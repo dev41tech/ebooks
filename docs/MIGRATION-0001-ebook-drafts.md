@@ -1,6 +1,19 @@
 # Migration 0001 — `ebook_drafts`
 
-Runbook para aplicar a migration `drizzle/0001_ebook_drafts.sql` no Postgres (Supabase).
+Runbook para aplicar a migration `drizzle/0001_ebook_drafts.sql` no Postgres.
+
+> **Status: já aplicada em produção** (conforme o handoff de infraestrutura de 2026-08-25).
+> Este runbook continua valendo para **ambientes novos** — staging, máquina local, ou uma
+> reinstalação. Antes de rodar, confira com a query da seção
+> [Como verificar se deu certo](#como-verificar-se-deu-certo): se as duas tabelas já
+> aparecerem, não há nada a fazer.
+
+> **Onde o Postgres vive.** A produção saiu do Cloudflare/D1 e hoje roda em Postgres próprio
+> no VPS do EasyPanel — o Supabase ficou só com Auth e Storage. Existem **duas** connection
+> strings e elas não são intercambiáveis: o app usa o host **interno** na 5432, e a migração
+> feita da máquina do dev usa `vps.41tech.cloud` na **3308**. Se a senha tiver caractere
+> especial, codifique (`@`→`%40`, `:`→`%3A`, `/`→`%2F`, `#`→`%23`, `%`→`%25`, `&`→`%26`) —
+> em **ambas**.
 
 ## Por que ela é necessária
 
@@ -27,23 +40,39 @@ dados já em produção.
 
 ## Atenção: qual connection string usar
 
-O Supabase expõe duas, e elas **não** são intercambiáveis aqui:
+O Postgres roda no mesmo VPS do app. São **duas** strings, e elas **não** são intercambiáveis:
 
-| Uso | String | Porta |
+| Uso | Host | Porta |
 |---|---|---|
-| App em runtime | Connection Pooling, modo *transaction* | `6543` |
-| **Esta migration (DDL)** | **Conexão direta** | **`5432`** |
+| App em runtime | host **interno** (nome do serviço no EasyPanel) | `5432` |
+| **Esta migration, rodada da máquina do dev** | **`vps.41tech.cloud`** | **`3308`** |
 
-DDL e prepared statements não funcionam de forma confiável através do pooler em modo transaction.
-Use a **direta (5432)** para aplicar a migration. (O mesmo já está anotado em `drizzle.config.ts`.)
+A 3308 é apenas o mapeamento externo da porta. Usar a externa no app faz o tráfego sair para a
+internet e voltar para o container vizinho.
+
+Se a senha tiver caractere especial, **codifique nas duas**: `@`→`%40`, `:`→`%3A`, `/`→`%2F`,
+`#`→`%23`, `?`→`%3F`, `%`→`%25`, `&`→`%26`. Um `@` cru quebra a URL (ele separa credencial de host)
+e o app falha com `28P01` — o que passa a falsa impressão de que a migration não rodou.
+
+> **`drizzle-kit migrate` falha em silêncio** com credencial errada: imprime
+> `Using 'postgres' driver...` e sai sem mensagem de erro. Não confie na saída — confirme as
+> tabelas com a query de verificação abaixo. `drizzle-kit check` também não resolve: ele valida
+> os arquivos de migração, não se foram aplicadas.
+>
+> Códigos úteis: `28P01` senha errada · `3D000` banco não existe · `ECONNREFUSED` porta fechada.
 
 ## Como aplicar
 
 Escolha **uma** das três opções.
 
-### Opção A — SQL Editor do Supabase (mais simples)
+### Opção A — colar o SQL num cliente Postgres (mais simples)
 
-Não exige nada instalado. No painel do Supabase → **SQL Editor** → **New query**, cole e execute:
+Vale para qualquer cliente conectado ao banco `ebooks`: DBeaver, pgAdmin, TablePlus, ou o console
+do próprio serviço Postgres no EasyPanel. Conecte com a string **externa** (`vps.41tech.cloud:3308`)
+se for da sua máquina, cole e execute:
+
+> Não use o SQL Editor do Supabase — desde a migração de infra o Supabase só cuida de Auth e
+> Storage; o Postgres da aplicação é o do VPS e o editor de lá não o alcança.
 
 ```sql
 CREATE TABLE IF NOT EXISTS "ebook_drafts" (
@@ -118,7 +147,8 @@ CREATE INDEX IF NOT EXISTS "ebook_drafts_owner_idx"
 ### Opção B — `psql`
 
 ```bash
-psql "$DATABASE_URL_DIRETA" -f drizzle/0001_ebook_drafts.sql
+psql "postgres://sambu:SENHA_CODIFICADA@vps.41tech.cloud:3308/ebooks" \
+  -f drizzle/0001_ebook_drafts.sql
 ```
 
 Aqui vale o arquivo original. Se já tiver sido aplicado antes, o comando falha em
@@ -129,11 +159,15 @@ Aqui vale o arquivo original. Se já tiver sido aplicado antes, o comando falha 
 Aplica o que estiver pendente no journal e registra a aplicação:
 
 ```bash
-DATABASE_URL="<conexão direta 5432>" npx drizzle-kit migrate
+DATABASE_URL="postgres://sambu:SENHA_CODIFICADA@vps.41tech.cloud:3308/ebooks" \
+  npx drizzle-kit migrate
 ```
 
 É a opção que mantém `drizzle/meta/_journal.json` em dia. Prefira esta se o fluxo do projeto já usa
 drizzle-kit para as migrations.
+
+**Confirme o resultado pela query de verificação, não pela saída do comando** — com credencial
+errada o drizzle-kit sai sem erro nenhum, como se tivesse funcionado.
 
 ## Como verificar se deu certo
 
