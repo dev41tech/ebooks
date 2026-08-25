@@ -1,8 +1,8 @@
-import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { strFromU8, unzipSync } from "fflate";
 import { getDb } from "../../../../db";
 import { books } from "../../../../db/schema";
+import { getObject } from "../../../../db/storage";
 
 function mediaType(path: string) {
   const extension = path.toLowerCase().split(".").pop();
@@ -77,18 +77,18 @@ export async function GET(request: Request) {
     return new Response(null, { status: 404 });
 
   if (book.coverKey) {
-    const cover = await env.BUCKET.get(book.coverKey);
+    const cover = await getObject(book.coverKey);
     if (cover)
       return new Response(cover.body, {
         headers: {
-          "content-type": cover.httpMetadata?.contentType || "image/jpeg",
+          "content-type": cover.contentType || "image/jpeg",
           "cache-control": "public, max-age=86400",
         },
       });
   }
   if (!book.epubKey || book.format?.toUpperCase().includes("PDF"))
     return new Response(null, { status: 404 });
-  const ebook = await env.BUCKET.get(book.epubKey);
+  const ebook = await getObject(book.epubKey);
   if (!ebook) return new Response(null, { status: 404 });
   try {
     const cover = extractCover(new Uint8Array(await ebook.arrayBuffer()));

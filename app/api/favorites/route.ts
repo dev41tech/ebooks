@@ -1,10 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { favorites } from "../../../db/schema";
-import { getChatGPTUser } from "../../chatgpt-auth";
+import { getUser } from "../../auth";
 
 export async function GET() {
-  const user = await getChatGPTUser();
+  const user = await getUser();
   if (!user) return Response.json({ favorites: [] });
   const db = await getDb();
   const rows = await db.select({ bookId: favorites.bookId }).from(favorites).where(eq(favorites.userEmail, user.email));
@@ -12,7 +12,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const user = await getChatGPTUser();
+  const user = await getUser();
   if (!user) return Response.json({ error: "sign_in_required" }, { status: 401 });
   const body = (await request.json()) as { bookId?: string; favorite?: boolean };
   if (!body.bookId || typeof body.favorite !== "boolean") return Response.json({ error: "invalid_payload" }, { status: 400 });

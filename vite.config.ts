@@ -33,7 +33,18 @@ const localBindingConfig = {
     : [],
 };
 
+// BUILD_TARGET=node produz o servidor Node (dist/standalone/server.js) usado no
+// container/EasyPanel. Sem essa variavel o build segue para Cloudflare Workers.
+const isNodeTarget = process.env.BUILD_TARGET === "node";
+
 export default defineConfig(async () => {
+  if (isNodeTarget) {
+    return {
+      server: { host: "0.0.0.0" },
+      plugins: [vinext(), sites()],
+    };
+  }
+
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";

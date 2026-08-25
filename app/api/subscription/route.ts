@@ -1,10 +1,10 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { subscriptions } from "../../../db/schema";
-import { getChatGPTUser } from "../../chatgpt-auth";
+import { getUser } from "../../auth";
 
 export async function GET() {
-  const user = await getChatGPTUser();
+  const user = await getUser();
   if (!user) return Response.json({ subscription: null });
   const db = await getDb();
   const [subscription] = await db.select().from(subscriptions).where(eq(subscriptions.userEmail, user.email)).limit(1);
@@ -12,7 +12,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const user = await getChatGPTUser();
+  const user = await getUser();
   if (!user) return Response.json({ error: "sign_in_required" }, { status: 401 });
   const body = (await request.json()) as { plan?: string };
   if (!body.plan || !["immersive_monthly", "immersive_annual", "family_monthly"].includes(body.plan)) return Response.json({ error: "invalid_plan" }, { status: 400 });

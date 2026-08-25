@@ -40,3 +40,6 @@ next-env.d.ts
 /.sites-runtime/
 /outputs/
 /work/
+tsconfig.tsbuildinfo
+deploy.local.sh
+migrate.local.sh

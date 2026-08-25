@@ -1,10 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { bookmarks } from "../../../db/schema";
-import { getChatGPTUser } from "../../chatgpt-auth";
+import { getUser } from "../../auth";
 
 export async function GET(request: Request) {
-  const user = await getChatGPTUser();
+  const user = await getUser();
   if (!user) return Response.json({ bookmarks: [] });
   const bookId = new URL(request.url).searchParams.get("bookId");
   const db = await getDb();
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const user = await getChatGPTUser();
+  const user = await getUser();
   if (!user)
     return Response.json({ error: "sign_in_required" }, { status: 401 });
   const body = (await request.json()) as {

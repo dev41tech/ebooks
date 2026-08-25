@@ -1,7 +1,7 @@
-import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { books } from "../../../../db/schema";
+import { getObject } from "../../../../db/storage";
 
 export async function GET(request: Request) {
   const id = new URL(request.url).searchParams.get("id");
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   const [book] = await db.select().from(books).where(eq(books.id, id)).limit(1);
   if (!book || book.status !== "published" || !book.epubKey)
     return Response.json({ error: "content_not_found" }, { status: 404 });
-  const object = await env.BUCKET.get(book.epubKey);
+  const object = await getObject(book.epubKey);
   if (!object)
     return Response.json({ error: "file_not_found" }, { status: 404 });
   const isPdf = book.format?.toUpperCase().includes("PDF");

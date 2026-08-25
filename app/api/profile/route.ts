@@ -1,10 +1,10 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { profiles } from "../../../db/schema";
-import { getChatGPTUser } from "../../chatgpt-auth";
+import { getUser } from "../../auth";
 
 export async function GET() {
-  const user = await getChatGPTUser();
+  const user = await getUser();
   if (!user) return Response.json({ profile: null });
   const db = await getDb();
   const [profile] = await db.select().from(profiles).where(eq(profiles.email, user.email)).limit(1);
@@ -12,7 +12,7 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
-  const user = await getChatGPTUser();
+  const user = await getUser();
   if (!user) return Response.json({ error: "sign_in_required" }, { status: 401 });
   const body = (await request.json()) as { displayName?: string; tasteProfile?: unknown };
   const displayName = body.displayName?.trim().slice(0, 80) || user.displayName || user.email.split("@")[0];

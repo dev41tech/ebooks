@@ -1,8 +1,8 @@
-import { env } from "cloudflare:workers";
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { books, importBatches, stagingBooks } from "../../../../db/schema";
-import { getChatGPTUser } from "../../../chatgpt-auth";
+import { getObject, putObject, deleteObject } from "../../../../db/storage";
+import { requireAdmin } from "../../../auth";
 
 type Row = {
   title?: string;
@@ -132,9 +132,8 @@ function clean(value: unknown, max = 500) {
 }
 
 export async function GET(request: Request) {
-  const user = await getChatGPTUser();
-  if (!user)
-    return Response.json({ error: "sign_in_required" }, { status: 401 });
+  const { user, error } = await requireAdmin();
+  if (error) return error;
   const db = await getDb();
   const fileId = new URL(request.url).searchParams.get("file");
   if (fileId) {
@@ -150,7 +149,7 @@ export async function GET(request: Request) {
       .limit(1);
     if (!item?.storageKey)
       return Response.json({ error: "file_not_found" }, { status: 404 });
-    const object = await env.BUCKET.get(item.storageKey);
+    const object = await getObject(item.storageKey);
     if (!object)
       return Response.json({ error: "file_not_found" }, { status: 404 });
     return new Response(object.body, {
@@ -174,9 +173,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const user = await getChatGPTUser();
-  if (!user)
-    return Response.json({ error: "sign_in_required" }, { status: 401 });
+  const { user, error } = await requireAdmin();
+  if (error) return error;
   const db = await getDb();
   const contentType = request.headers.get("content-type") || "";
   const now = new Date().toISOString(),
@@ -264,12 +262,7 @@ export async function POST(request: Request) {
       if (file.size > 40_000_000) validationErrors.push("Arquivo excede 40 MB");
       else {
         storageKey = `imports/${batchId}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-120)}`;
-        await env.BUCKET.put(storageKey, file.stream(), {
-          httpMetadata: {
-            contentType: file.type || "application/octet-stream",
-          },
-          customMetadata: { owner: user.email, batchId },
-        });
+        await putObject(storageKey, file, file.type);
       }
     } else if (fileName)
       validationErrors.push("Arquivo não encontrado no lote");
@@ -344,9 +337,8 @@ function slugify(title: string, id: string) {
 }
 
 export async function PATCH(request: Request) {
-  const user = await getChatGPTUser();
-  if (!user)
-    return Response.json({ error: "sign_in_required" }, { status: 401 });
+  const { user, error } = await requireAdmin();
+  if (error) return error;
   const form = await request.formData();
   const id = clean(form.get("id"), 80);
   const action = clean(form.get("action"), 30);
@@ -377,10 +369,7 @@ export async function PATCH(request: Request) {
     if (!cover.type.startsWith("image/") || cover.size > 8_000_000)
       return Response.json({ error: "invalid_cover" }, { status: 400 });
     coverKey = `imports/${item.batchId}/covers/${crypto.randomUUID()}-${cover.name.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-100)}`;
-    await env.BUCKET.put(coverKey, cover.stream(), {
-      httpMetadata: { contentType: cover.type },
-      customMetadata: { owner: user.email, stagingBookId: item.id },
-    });
+    await putObject(coverKey, cover, cover.type);
   }
   const requiredOk = title && author && genre && description && licenseType;
   if (
@@ -445,9 +434,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const user = await getChatGPTUser();
-  if (!user)
-    return Response.json({ error: "sign_in_required" }, { status: 401 });
+  const { user, error } = await requireAdmin();
+  if (error) return error;
   const db = await getDb();
   const id = new URL(request.url).searchParams.get("id");
   if (id) {
@@ -459,8 +447,8 @@ export async function DELETE(request: Request) {
       )
       .limit(1);
     if (!item) return Response.json({ error: "not_found" }, { status: 404 });
-    if (item.storageKey) await env.BUCKET.delete(item.storageKey);
-    if (item.coverKey) await env.BUCKET.delete(item.coverKey);
+    if (item.storageKey) await deleteObject(item.storageKey);
+    if (item.coverKey) await deleteObject(item.coverKey);
     await db.delete(stagingBooks).where(eq(stagingBooks.id, id));
     return Response.json({ ok: true });
   }

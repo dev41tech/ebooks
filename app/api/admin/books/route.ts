@@ -1,12 +1,11 @@
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { books } from "../../../../db/schema";
-import { getChatGPTUser } from "../../../chatgpt-auth";
+import { requireAdmin } from "../../../auth";
 
 export async function GET() {
-  const user = await getChatGPTUser();
-  if (!user)
-    return Response.json({ error: "sign_in_required" }, { status: 401 });
+  const { user, error } = await requireAdmin();
+  if (error) return error;
   const db = await getDb();
   return Response.json({
     books: await db.select().from(books).orderBy(desc(books.createdAt)),
@@ -14,9 +13,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const user = await getChatGPTUser();
-  if (!user)
-    return Response.json({ error: "sign_in_required" }, { status: 401 });
+  const { user, error } = await requireAdmin();
+  if (error) return error;
   const body = (await request.json()) as Record<string, unknown>;
   const title = String(body.title || "")
     .trim()
@@ -71,9 +69,8 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const user = await getChatGPTUser();
-  if (!user)
-    return Response.json({ error: "sign_in_required" }, { status: 401 });
+  const { user, error } = await requireAdmin();
+  if (error) return error;
   const body = (await request.json()) as Record<string, unknown>;
   const id = String(body.id || "");
   const status = String(body.status || "draft");

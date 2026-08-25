@@ -1,22 +1,24 @@
 import {
+  boolean,
   integer,
-  sqliteTable,
+  jsonb,
+  pgTable,
   text,
   uniqueIndex,
-} from "drizzle-orm/sqlite-core";
-export const profiles = sqliteTable(
+} from "drizzle-orm/pg-core";
+export const profiles = pgTable(
   "profiles",
   {
     id: text("id").primaryKey(),
     email: text("email").notNull(),
     displayName: text("display_name"),
     role: text("role").notNull().default("reader"),
-    tasteProfile: text("taste_profile", { mode: "json" }),
+    tasteProfile: jsonb("taste_profile"),
     createdAt: text("created_at").notNull(),
   },
   (t) => [uniqueIndex("profiles_email_idx").on(t.email)],
 );
-export const books = sqliteTable(
+export const books = pgTable(
   "books",
   {
     id: text("id").primaryKey(),
@@ -29,13 +31,13 @@ export const books = sqliteTable(
     language: text("language").notNull().default("pt-BR"),
     isbn: text("isbn"),
     collection: text("collection"),
-    featured: integer("featured", { mode: "boolean" }).notNull().default(false),
+    featured: boolean("featured").notNull().default(false),
     freeChapters: integer("free_chapters").notNull().default(1),
     format: text("format"),
     ageRating: text("age_rating"),
     description: text("description").notNull(),
     priceCents: integer("price_cents"),
-    subscribersOnly: integer("subscribers_only", { mode: "boolean" }).default(
+    subscribersOnly: boolean("subscribers_only").default(
       false,
     ),
     coverKey: text("cover_key"),
@@ -48,7 +50,7 @@ export const books = sqliteTable(
   },
   (t) => [uniqueIndex("books_slug_idx").on(t.slug)],
 );
-export const chapters = sqliteTable("chapters", {
+export const chapters = pgTable("chapters", {
   id: text("id").primaryKey(),
   bookId: text("book_id")
     .notNull()
@@ -58,7 +60,7 @@ export const chapters = sqliteTable("chapters", {
   content: text("content").notNull(),
   createdAt: text("created_at").notNull(),
 });
-export const readingProgress = sqliteTable(
+export const readingProgress = pgTable(
   "reading_progress",
   {
     id: text("id").primaryKey(),
@@ -70,7 +72,7 @@ export const readingProgress = sqliteTable(
   },
   (t) => [uniqueIndex("progress_owner_book_idx").on(t.userEmail, t.bookId)],
 );
-export const bookmarks = sqliteTable(
+export const bookmarks = pgTable(
   "bookmarks",
   {
     id: text("id").primaryKey(),
@@ -89,7 +91,7 @@ export const bookmarks = sqliteTable(
     ),
   ],
 );
-export const favorites = sqliteTable(
+export const favorites = pgTable(
   "favorites",
   {
     id: text("id").primaryKey(),
@@ -99,17 +101,17 @@ export const favorites = sqliteTable(
   },
   (t) => [uniqueIndex("favorites_owner_book_idx").on(t.userEmail, t.bookId)],
 );
-export const analyticsEvents = sqliteTable("analytics_events", {
+export const analyticsEvents = pgTable("analytics_events", {
   id: text("id").primaryKey(),
   userEmail: text("user_email"),
   anonymousId: text("anonymous_id"),
   event: text("event").notNull(),
   bookId: text("book_id"),
   chapterId: text("chapter_id"),
-  metadata: text("metadata", { mode: "json" }),
+  metadata: jsonb("metadata"),
   createdAt: text("created_at").notNull(),
 });
-export const subscriptions = sqliteTable(
+export const subscriptions = pgTable(
   "subscriptions",
   {
     id: text("id").primaryKey(),
@@ -120,7 +122,7 @@ export const subscriptions = sqliteTable(
     providerCustomerId: text("provider_customer_id"),
     providerSubscriptionId: text("provider_subscription_id"),
     currentPeriodEnd: text("current_period_end"),
-    cancelAtPeriodEnd: integer("cancel_at_period_end", { mode: "boolean" })
+    cancelAtPeriodEnd: boolean("cancel_at_period_end")
       .notNull()
       .default(false),
     createdAt: text("created_at").notNull(),
@@ -128,7 +130,7 @@ export const subscriptions = sqliteTable(
   },
   (t) => [uniqueIndex("subscription_owner_idx").on(t.userEmail)],
 );
-export const reviews = sqliteTable(
+export const reviews = pgTable(
   "reviews",
   {
     id: text("id").primaryKey(),
@@ -142,7 +144,7 @@ export const reviews = sqliteTable(
   },
   (t) => [uniqueIndex("reviews_owner_book_idx").on(t.userEmail, t.bookId)],
 );
-export const readingSessions = sqliteTable("reading_sessions", {
+export const readingSessions = pgTable("reading_sessions", {
   id: text("id").primaryKey(),
   userEmail: text("user_email").notNull(),
   bookId: text("book_id").notNull(),
@@ -151,7 +153,7 @@ export const readingSessions = sqliteTable("reading_sessions", {
   startedAt: text("started_at").notNull(),
   endedAt: text("ended_at"),
 });
-export const notifications = sqliteTable("notifications", {
+export const notifications = pgTable("notifications", {
   id: text("id").primaryKey(),
   userEmail: text("user_email").notNull(),
   type: text("type").notNull(),
@@ -160,7 +162,7 @@ export const notifications = sqliteTable("notifications", {
   readAt: text("read_at"),
   createdAt: text("created_at").notNull(),
 });
-export const mediaAssets = sqliteTable(
+export const mediaAssets = pgTable(
   "media_assets",
   {
     id: text("id").primaryKey(),
@@ -176,7 +178,7 @@ export const mediaAssets = sqliteTable(
   },
   (t) => [uniqueIndex("media_storage_key_idx").on(t.storageKey)],
 );
-export const importBatches = sqliteTable("import_batches", {
+export const importBatches = pgTable("import_batches", {
   id: text("id").primaryKey(),
   ownerEmail: text("owner_email").notNull(),
   name: text("name").notNull(),
@@ -189,7 +191,7 @@ export const importBatches = sqliteTable("import_batches", {
   createdAt: text("created_at").notNull(),
   expiresAt: text("expires_at"),
 });
-export const stagingBooks = sqliteTable(
+export const stagingBooks = pgTable(
   "staging_books",
   {
     id: text("id").primaryKey(),
@@ -211,15 +213,15 @@ export const stagingBooks = sqliteTable(
     fileSize: integer("file_size"),
     coverKey: text("cover_key"),
     status: text("status").notNull().default("ready"),
-    rightsConfirmed: integer("rights_confirmed", { mode: "boolean" })
+    rightsConfirmed: boolean("rights_confirmed")
       .notNull()
       .default(false),
     reviewedBy: text("reviewed_by"),
     reviewedAt: text("reviewed_at"),
     correctionNote: text("correction_note"),
     publishedBookId: text("published_book_id"),
-    validationErrors: text("validation_errors", { mode: "json" }),
-    isTest: integer("is_test", { mode: "boolean" }).notNull().default(true),
+    validationErrors: jsonb("validation_errors"),
+    isTest: boolean("is_test").notNull().default(true),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at"),
     expiresAt: text("expires_at"),

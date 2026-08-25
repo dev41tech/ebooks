@@ -1,8 +1,8 @@
-import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { books, mediaAssets } from "../../../db/schema";
-import { getChatGPTUser } from "../../chatgpt-auth";
+import { putObject } from "../../../db/storage";
+import { getUser } from "../../auth";
 
 const allowed: Record<string, string[]> = {
   cover: ["image/jpeg", "image/png", "image/webp"],
@@ -16,7 +16,7 @@ const limits: Record<string, number> = {
 };
 
 export async function POST(request: Request) {
-  const user = await getChatGPTUser();
+  const user = await getUser();
   if (!user)
     return Response.json({ error: "sign_in_required" }, { status: 401 });
   const form = await request.formData();
@@ -32,10 +32,7 @@ export async function POST(request: Request) {
   const id = crypto.randomUUID();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-120);
   const storageKey = `books/${bookId || "unassigned"}/${kind}/${id}-${safeName}`;
-  await env.BUCKET.put(storageKey, file.stream(), {
-    httpMetadata: { contentType: file.type },
-    customMetadata: { owner: user.email, kind },
-  });
+  await putObject(storageKey, file, file.type);
   const record = {
     id,
     ownerEmail: user.email,
@@ -62,7 +59,7 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const user = await getChatGPTUser();
+  const user = await getUser();
   if (!user)
     return Response.json({ error: "sign_in_required" }, { status: 401 });
   const bookId = new URL(request.url).searchParams.get("bookId");

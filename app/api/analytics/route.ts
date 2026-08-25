@@ -1,9 +1,9 @@
 import { getDb } from "../../../db";
 import { analyticsEvents } from "../../../db/schema";
-import { getChatGPTUser } from "../../chatgpt-auth";
+import { getUser } from "../../auth";
 
 export async function POST(request: Request) {
-  const user = await getChatGPTUser();
+  const user = await getUser();
   const body = (await request.json()) as { event?: string; bookId?: string; chapterId?: string; anonymousId?: string; metadata?: unknown };
   if (!body.event || body.event.length > 80) return Response.json({ error: "invalid_event" }, { status: 400 });
   const db = await getDb();
