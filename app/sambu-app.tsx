@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Field, Icon } from "./ui";
+import Producao from "./studio-ia";
 
 type User = { name: string; email: string } | null;
 type View =
@@ -12,6 +14,7 @@ type View =
   | "plans"
   | "profile"
   | "studio"
+  | "producao"
   | "admin";
 type Chapter = {
   id: string;
@@ -470,21 +473,9 @@ const NAV: { id: View; label: string }[] = [
   { id: "catalog", label: "Explorar" },
   { id: "library", label: "Minha biblioteca" },
   { id: "studio", label: "Studio do autor" },
+  { id: "producao", label: "Produzir com IA" },
 ];
 
-function Icon({ name }: { name: string }) {
-  const g: Record<string, string> = {
-    search: "⌕",
-    home: "⌂",
-    book: "▤",
-    headphones: "◉",
-    user: "○",
-    bell: "◌",
-    play: "▶",
-    lock: "▣",
-  };
-  return <span aria-hidden="true">{g[name] || "•"}</span>;
-}
 
 function Cover({ book, large = false }: { book: Book; large?: boolean }) {
   return (
@@ -513,32 +504,6 @@ function Cover({ book, large = false }: { book: Book; large?: boolean }) {
   );
 }
 
-function Field({
-  label,
-  name,
-  type = "text",
-  placeholder,
-  children,
-  required = false,
-}: {
-  label: string;
-  name: string;
-  type?: string;
-  placeholder?: string;
-  children?: React.ReactNode;
-  required?: boolean;
-}) {
-  return (
-    <label className="field">
-      <span>
-        {label}
-        {required && <b> *</b>}
-      </span>
-      {children || <input name={name} type={type} placeholder={placeholder} />}
-      <small>{name}</small>
-    </label>
-  );
-}
 
 export default function SambuApp({ user }: { user: User }) {
   // O access token do Supabase dura ~1h. Renova ao abrir e a cada 45 min,
@@ -869,6 +834,7 @@ export default function SambuApp({ user }: { user: User }) {
       {view === "studio" && (
         <Studio tab={studioTab} setTab={setStudioTab} notify={notify} />
       )}{" "}
+      {view === "producao" && <Producao notify={notify} />}{" "}
       {view === "admin" && <AdminV2 go={go} />}{" "}
       {toast && <div className="toast">✓ {toast}</div>}
     </div>

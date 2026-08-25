@@ -178,6 +178,59 @@ export const mediaAssets = pgTable(
   },
   (t) => [uniqueIndex("media_storage_key_idx").on(t.storageKey)],
 );
+// Produção de ebooks por IA (telas portadas do Sambu Ebooks). Guarda o pedido do
+// autor e o rascunho resultante. A geração em si ainda não roda aqui — o registro
+// nasce em "rascunho" e é preenchido quando a etapa de geração for ligada.
+export const ebookDrafts = pgTable("ebook_drafts", {
+  id: text("id").primaryKey(),
+  ownerEmail: text("owner_email").notNull(),
+  origin: text("origin").notNull().default("ia"),
+  category: text("category").notNull().default("geral"),
+  title: text("title").notNull().default(""),
+  titleMode: text("title_mode").notNull().default("ai"),
+  subtitle: text("subtitle").notNull().default(""),
+  theme: text("theme").notNull(),
+  audience: text("audience").notNull().default(""),
+  tone: text("tone").notNull().default("Motivador"),
+  language: text("language").notNull().default("Português (Brasil)"),
+  pageCount: integer("page_count").notNull().default(20),
+  wordsPerPage: integer("words_per_page").notNull().default(250),
+  authorName: text("author_name").notNull().default(""),
+  authorBio: text("author_bio").notNull().default(""),
+  extraInstructions: text("extra_instructions").notNull().default(""),
+  referenceMaterial: text("reference_material").notNull().default(""),
+  referenceSource: text("reference_source").notNull().default(""),
+  coverSource: text("cover_source").notNull().default("none"),
+  coverSuggestion: text("cover_suggestion").notNull().default(""),
+  coverKey: text("cover_key"),
+  sourceFileName: text("source_file_name"),
+  sourceStorageKey: text("source_storage_key"),
+  intro: text("intro").notNull().default(""),
+  conclusion: text("conclusion").notNull().default(""),
+  marketing: jsonb("marketing"),
+  status: text("status").notNull().default("rascunho"),
+  statusMessage: text("status_message").notNull().default(""),
+  publishedBookId: text("published_book_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const ebookDraftChapters = pgTable(
+  "ebook_draft_chapters",
+  {
+    id: text("id").primaryKey(),
+    draftId: text("draft_id")
+      .notNull()
+      .references(() => ebookDrafts.id),
+    position: integer("position").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    content: text("content").notNull().default(""),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("draft_chapter_position_idx").on(t.draftId, t.position)],
+);
+
 export const importBatches = pgTable("import_batches", {
   id: text("id").primaryKey(),
   ownerEmail: text("owner_email").notNull(),
