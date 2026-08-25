@@ -541,6 +541,21 @@ function Field({
 }
 
 export default function SambuApp({ user }: { user: User }) {
+  // O access token do Supabase dura ~1h. Renova ao abrir e a cada 45 min,
+  // para a sessao nao cair silenciosamente com a aba aberta.
+  useEffect(() => {
+    if (!user) return;
+    const renew = () =>
+      fetch("/api/auth", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "refresh" }),
+      }).catch(() => {});
+    renew();
+    const timer = setInterval(renew, 45 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [user]);
+
   const [view, setView] = useState<View>("home"),
     [catalogBooks, setCatalogBooks] = useState<Book[]>(BOOKS),
     [selected, setSelected] = useState(BOOKS[0]),
@@ -759,9 +774,15 @@ export default function SambuApp({ user }: { user: User }) {
               <button className="icon-btn">
                 <Icon name="bell" />
               </button>
-              <button className="avatar" onClick={() => go("profile")}>
-                {user?.name?.charAt(0).toUpperCase() || "M"}
-              </button>
+              {user ? (
+                <button className="avatar" onClick={() => go("profile")}>
+                  {user.name.charAt(0).toUpperCase()}
+                </button>
+              ) : (
+                <a className="sign-in" href="/login">
+                  Entrar
+                </a>
+              )}
             </div>
           </header>
           <div className="mobile-tabs">
@@ -1742,8 +1763,8 @@ function Profile({
   type ProfileTab = "personal" | "reading" | "subscription" | "notifications" | "privacy";
   const [activeTab, setActiveTab] = useState<ProfileTab>("personal");
   const [saving, setSaving] = useState(false);
-  const [profileName, setProfileName] = useState(user?.name || "Marcos Dias");
-  const [displayName, setDisplayName] = useState(user?.name || "Marcos");
+  const [profileName, setProfileName] = useState(user?.name || "");
+  const [displayName, setDisplayName] = useState(user?.name || "");
   const tabs: { id: ProfileTab; label: string; icon: string }[] = [
     { id: "personal", label: "Dados pessoais", icon: "♙" },
     { id: "reading", label: "Preferências de leitura", icon: "Aa" },
@@ -1777,11 +1798,11 @@ function Profile({
       <aside>
         <div className="profile-summary">
           <div className="profile-avatar">
-            {profileName?.charAt(0).toUpperCase() || "M"}
+            {(profileName || user?.email || "?").charAt(0).toUpperCase()}
           </div>
           <div>
-            <h3>{profileName}</h3>
-            <p>{user?.email || "marcos@sambu.online"}</p>
+            <h3>{profileName || user?.email || "Visitante"}</h3>
+            <p>{user?.email || "Você não está autenticado"}</p>
           </div>
         </div>
         <nav className="profile-menu" aria-label="Configurações da conta">
@@ -1797,6 +1818,25 @@ function Profile({
             </button>
           ))}
         </nav>
+        {user ? (
+          <button
+            className="session-link"
+            onClick={async () => {
+              await fetch("/api/auth", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ action: "logout" }),
+              });
+              window.location.href = "/";
+            }}
+          >
+            Sair da conta
+          </button>
+        ) : (
+          <a className="session-link" href="/login">
+            Entrar na conta
+          </a>
+        )}
         <button className="admin-link" onClick={() => go("admin")}>
           Painel administrativo <span>↗</span>
         </button>

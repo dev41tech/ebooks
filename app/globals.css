@@ -9,3 +9,7 @@
 .login-card .primary{margin-top:6px}
 .login-error{color:var(--coral);font-size:13px;font-weight:700;margin:0}
 .login-notice{color:var(--teal);font-size:13px;font-weight:700;margin:0}
+.sign-in{display:inline-flex;align-items:center;background:var(--coral);color:#fff;border-radius:99px;padding:10px 20px;font-weight:800;text-decoration:none}
+.sign-in:hover{filter:brightness(.94)}
+.session-link{display:block;width:100%;text-align:left;border:1px solid var(--line);background:var(--white);color:var(--ink);border-radius:12px;padding:12px 14px;font-weight:700;text-decoration:none;margin-bottom:8px}
+.session-link:hover{background:var(--mist)}
