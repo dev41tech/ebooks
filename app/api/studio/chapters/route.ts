@@ -3,7 +3,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { ebookDraftChapters, ebookDrafts } from "../../../../db/schema";
-import { getUser } from "../../../auth";
+import { requireAuthor } from "../../../auth";
 
 async function ownsDraft(email: string, draftId: string): Promise<boolean> {
   const db = await getDb();
@@ -16,8 +16,8 @@ async function ownsDraft(email: string, draftId: string): Promise<boolean> {
 }
 
 export async function GET(request: Request) {
-  const user = await getUser();
-  if (!user) return Response.json({ chapters: [] });
+  const { user, error } = await requireAuthor();
+  if (error) return error;
 
   const draftId = new URL(request.url).searchParams.get("draftId");
   if (!draftId)
@@ -35,9 +35,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const user = await getUser();
-  if (!user)
-    return Response.json({ error: "sign_in_required" }, { status: 401 });
+  const { user, error } = await requireAuthor();
+  if (error) return error;
 
   const body = (await request.json()) as {
     draftId?: string;
@@ -72,9 +71,8 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const user = await getUser();
-  if (!user)
-    return Response.json({ error: "sign_in_required" }, { status: 401 });
+  const { user, error } = await requireAuthor();
+  if (error) return error;
 
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return Response.json({ error: "invalid_payload" }, { status: 400 });

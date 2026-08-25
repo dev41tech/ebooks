@@ -292,6 +292,8 @@ async function enviarRascunho(payload: Record<string, unknown>) {
       invalid_words_per_page: "Palavras por página deve estar entre 150 e 500.",
       reference_required: "Cole o material de referência para este tipo de ebook.",
       sign_in_required: "Entre na sua conta para criar um ebook.",
+      forbidden:
+        "Seu acesso ao Studio ainda não foi liberado. Fale com a administração.",
     };
     throw new Error(motivos[data.error || ""] || "Não foi possível salvar.");
   }

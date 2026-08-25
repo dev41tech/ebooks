@@ -91,6 +91,57 @@ export async function requireAdmin(): Promise<
   return { user, error: null };
 }
 
+/**
+ * Quem pode usar o Studio: admin (por ADMIN_EMAILS) ou quem tiver `profiles.role`
+ * marcado como "author"/"admin" no banco.
+ *
+ * O cadastro do site e aberto e `profiles.role` nasce "reader", entao hoje isto
+ * fecha o Studio para todo mundo fora da lista de admin -- que e o objetivo:
+ * quando a geracao por IA for ligada, um desconhecido que se cadastre nao pode
+ * queimar credito. Liberar um autor depois e um UPDATE em profiles.role, sem
+ * deploy nem mudanca de codigo.
+ */
+export async function isAuthor(email: string): Promise<boolean> {
+  if (isAdmin(email)) return true;
+
+  const { getDb } = await import("../db");
+  const { profiles } = await import("../db/schema");
+  const { eq } = await import("drizzle-orm");
+
+  const db = await getDb();
+  const [profile] = await db
+    .select({ role: profiles.role })
+    .from(profiles)
+    .where(eq(profiles.email, email))
+    .limit(1);
+
+  const role = profile?.role?.toLowerCase();
+  return role === "author" || role === "admin";
+}
+
+/**
+ * Portao das rotas /api/studio. Mesmo contrato de `requireAdmin()`: o handler
+ * aborta com `if (error) return error`.
+ */
+export async function requireAuthor(): Promise<
+  { user: SessionUser; error: null } | { user: null; error: Response }
+> {
+  const user = await getUser();
+  if (!user) {
+    return {
+      user: null,
+      error: Response.json({ error: "sign_in_required" }, { status: 401 }),
+    };
+  }
+  if (!(await isAuthor(user.email))) {
+    return {
+      user: null,
+      error: Response.json({ error: "forbidden" }, { status: 403 }),
+    };
+  }
+  return { user, error: null };
+}
+
 export function safeReturnPath(value: string): string {
   if (!value.startsWith("/") || value.startsWith("//")) return "/";
   try {

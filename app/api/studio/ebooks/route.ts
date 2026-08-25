@@ -7,7 +7,7 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { ebookDraftChapters, ebookDrafts } from "../../../../db/schema";
-import { getUser } from "../../../auth";
+import { requireAuthor } from "../../../auth";
 
 const TONES = ["Motivador", "Técnico e direto", "Descontraído", "Formal"];
 const LANGUAGES = [
@@ -26,8 +26,8 @@ function text(value: unknown, max: number): string {
 }
 
 export async function GET(request: Request) {
-  const user = await getUser();
-  if (!user) return Response.json({ drafts: [] });
+  const { user, error } = await requireAuthor();
+  if (error) return error;
 
   const id = new URL(request.url).searchParams.get("id");
   const db = await getDb();
@@ -56,9 +56,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const user = await getUser();
-  if (!user)
-    return Response.json({ error: "sign_in_required" }, { status: 401 });
+  const { user, error } = await requireAuthor();
+  if (error) return error;
 
   const body = (await request.json()) as Record<string, unknown>;
 
@@ -125,9 +124,8 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const user = await getUser();
-  if (!user)
-    return Response.json({ error: "sign_in_required" }, { status: 401 });
+  const { user, error } = await requireAuthor();
+  if (error) return error;
 
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return Response.json({ error: "invalid_payload" }, { status: 400 });
@@ -156,9 +154,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const user = await getUser();
-  if (!user)
-    return Response.json({ error: "sign_in_required" }, { status: 401 });
+  const { user, error } = await requireAuthor();
+  if (error) return error;
 
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return Response.json({ error: "invalid_payload" }, { status: 400 });
