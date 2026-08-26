@@ -495,7 +495,9 @@ const NAV: { id: View; label: string }[] = [
   { id: "catalog", label: "Explorar" },
   { id: "library", label: "Minha biblioteca" },
   { id: "studio", label: "Studio do autor" },
-  { id: "producao", label: "Produzir com IA" },
+  // "Produzir com IA" saiu do menu por ora. A view e o componente continuam
+  // montados abaixo, entao devolver o item a esta lista basta para reativar.
+  // { id: "producao", label: "Produzir com IA" },
 ];
 
 function Icon({ name }: { name: string }) {
