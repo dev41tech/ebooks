@@ -1,8 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./review.css";
+// Dominio de producao. As imagens de OG/Twitter sao resolvidas contra esta base,
+// entao apontar para o dominio errado quebra a previa em WhatsApp, LinkedIn e afins.
+// SITE_URL permite sobrescrever em staging sem mexer no codigo.
+const SITE_URL = process.env.SITE_URL || "https://ebooks.41tech.cloud";
+
 export const metadata: Metadata = {
-  metadataBase: new URL("https://sambu-online.marcosdiascwb.chatgpt.site"),
+  metadataBase: new URL(SITE_URL),
   title: "Sambu",
   description:
     "Histórias que ficam em você. Leia, ouça e descubra novas vozes brasileiras.",
