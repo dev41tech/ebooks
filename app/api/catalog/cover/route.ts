@@ -93,7 +93,7 @@ export async function GET(request: Request) {
   try {
     const cover = extractCover(new Uint8Array(await ebook.arrayBuffer()));
     if (!cover) return new Response(null, { status: 404 });
-    return new Response(cover.bytes, {
+    return new Response(cover.bytes.buffer as ArrayBuffer, {
       headers: {
         "content-type": cover.type,
         "cache-control": "public, max-age=86400",

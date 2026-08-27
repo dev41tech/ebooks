@@ -84,7 +84,7 @@ function extractEpub(bytes: Uint8Array) {
     )
       continue;
     const html = strFromU8(files[path]);
-    const title =
+    const title: string =
       textOnly(html.match(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/i)?.[1] || "") ||
       textOnly(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "") ||
       `Capítulo ${chapters.length + 1}`;

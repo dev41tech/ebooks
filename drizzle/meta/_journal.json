@@ -15,6 +15,13 @@
       "when": 1787686000000,
       "tag": "0001_ebook_drafts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787780000000,
+      "tag": "0002_book_classification",
+      "breakpoints": true
     }
   ]
 }

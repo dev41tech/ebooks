@@ -8,6 +8,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { ebookDraftChapters, ebookDrafts } from "../../../../db/schema";
 import { requireAuthor } from "../../../auth";
+import { isCategoriaValida } from "../../../categorias";
 
 const TONES = ["Motivador", "Técnico e direto", "Descontraído", "Formal"];
 const LANGUAGES = [
@@ -65,6 +66,18 @@ export async function POST(request: Request) {
   if (!theme)
     return Response.json({ error: "theme_required" }, { status: 400 });
 
+  // A categoria principal e o proprio theme: e ela que orienta a geracao e, ao
+  // publicar, vira o genre/tags do catalogo. As secundarias so classificam.
+  const categoryMain = text(body.categoryMain ?? theme, 140);
+  if (categoryMain && !isCategoriaValida(categoryMain))
+    return Response.json({ error: "invalid_category" }, { status: 400 });
+  const categoriesSecondary = Array.isArray(body.categoriesSecondary)
+    ? (body.categoriesSecondary as unknown[])
+        .map((c) => String(c).trim())
+        .filter((c) => isCategoriaValida(c) && c !== categoryMain)
+        .slice(0, 8)
+    : [];
+
   const pageCount = Number(body.pageCount ?? 20);
   if (!Number.isFinite(pageCount) || pageCount < 1 || pageCount > 1000)
     return Response.json({ error: "invalid_page_count" }, { status: 400 });
@@ -95,6 +108,8 @@ export async function POST(request: Request) {
     ownerEmail: user.email,
     origin,
     category,
+    categoryMain,
+    categoriesSecondary,
     title: text(body.title, 200),
     titleMode: body.title ? "manual" : "ai",
     subtitle: text(body.subtitle, 200),

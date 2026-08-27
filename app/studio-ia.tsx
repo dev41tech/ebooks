@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Field, Icon } from "./ui";
+import { TAXONOMIA } from "./categorias";
 
 type Painel =
   | "lista"
@@ -62,6 +63,84 @@ const PAINEIS: { id: Painel; n: string; label: string }[] = [
   { id: "marketing", n: "06", label: "Marketing" },
   { id: "ideias", n: "07", label: "Ideias de nichos" },
 ];
+
+// Classificacao usada na busca do catalogo e, no caso da principal, como tema que
+// alimenta a geracao. Substituiu o campo "Tema / Nicho" de texto livre.
+function Classificacao({
+  principal,
+  onPrincipal,
+  secundarias,
+  onSecundarias,
+  obrigatorio = true,
+}: {
+  principal: string;
+  onPrincipal: (v: string) => void;
+  secundarias: string[];
+  onSecundarias: (v: string[]) => void;
+  obrigatorio?: boolean;
+}) {
+  function alternar(caminho: string) {
+    onSecundarias(
+      secundarias.includes(caminho)
+        ? secundarias.filter((c) => c !== caminho)
+        : [...secundarias, caminho],
+    );
+  }
+
+  return (
+    <>
+      <Field label="Categoria principal" name="category_main" required={obrigatorio}>
+        <select
+          value={principal}
+          onChange={(e) => onPrincipal(e.target.value)}
+          required={obrigatorio}
+        >
+          <option value="">Selecione…</option>
+          {TAXONOMIA.map((g) => (
+            <optgroup key={g.grupo} label={g.grupo}>
+              {g.itens.map((item) => (
+                <option key={`${g.grupo} > ${item}`} value={`${g.grupo} > ${item}`}>
+                  {item}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </Field>
+
+      <Field label="Categorias secundárias (opcional)" name="categories_secondary">
+        <details className="secondary-categories">
+          <summary>
+            {secundarias.length > 0
+              ? `${secundarias.length} selecionada(s)`
+              : "Escolher categorias secundárias"}
+          </summary>
+          <div>
+            {TAXONOMIA.map((g) => (
+              <div key={g.grupo}>
+                <p className="eyebrow">{g.grupo}</p>
+                {g.itens.map((item) => {
+                  const caminho = `${g.grupo} > ${item}`;
+                  return (
+                    <button
+                      key={caminho}
+                      type="button"
+                      disabled={caminho === principal}
+                      className={secundarias.includes(caminho) ? "chip on" : "chip"}
+                      onClick={() => alternar(caminho)}
+                    >
+                      {item}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </details>
+      </Field>
+    </>
+  );
+}
 
 function AvisoGeracao() {
   return (
@@ -401,8 +480,8 @@ function CamposComuns({
         name="extra_instructions"
       >
         <textarea
-          rows={2}
-          maxLength={1000}
+          rows={10}
+          maxLength={5000}
           value={extraInstructions}
           onChange={(e) => setExtraInstructions(e.target.value)}
           placeholder="Ex.: dê ênfase à parte prática, use exemplos brasileiros, evite um tom acadêmico…"
@@ -497,6 +576,7 @@ function useCamposComuns() {
 
 function FormularioIA({ aoCriar }: { aoCriar: (m: string) => Promise<void> }) {
   const [theme, setTheme] = useState("");
+  const [secundarias, setSecundarias] = useState<string[]>([]);
   const [audience, setAudience] = useState("");
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
@@ -507,7 +587,14 @@ function FormularioIA({ aoCriar }: { aoCriar: (m: string) => Promise<void> }) {
     setEnviando(true);
     setErro(null);
     try {
-      await enviarRascunho({ ...comuns.payload, origin: "ia", theme, audience });
+      await enviarRascunho({
+        ...comuns.payload,
+        origin: "ia",
+        theme,
+        audience,
+        categoryMain: theme,
+        categoriesSecondary: secundarias,
+      });
       await aoCriar("Ebook criado e aguardando geração");
     } catch (err) {
       setErro(err instanceof Error ? err.message : "Erro ao salvar.");
@@ -521,14 +608,12 @@ function FormularioIA({ aoCriar }: { aoCriar: (m: string) => Promise<void> }) {
         <h2>Criar novo ebook com IA</h2>
       </div>
       <AvisoGeracao />
-      <Field label="Tema / Nicho" name="theme" required>
-        <input
-          value={theme}
-          onChange={(e) => setTheme(e.target.value)}
-          placeholder="ex: emagrecimento"
-          required
-        />
-      </Field>
+      <Classificacao
+        principal={theme}
+        onPrincipal={setTheme}
+        secundarias={secundarias}
+        onSecundarias={setSecundarias}
+      />
       <Field label="Público-alvo" name="audience">
         <textarea
           rows={2}

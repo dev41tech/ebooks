@@ -28,6 +28,11 @@ export const books = pgTable(
     author: text("author").notNull(),
     authorId: text("author_id"),
     genre: text("genre").notNull(),
+    // Classificacao hierarquica vinda do Sambu Ebooks. `genre` continua sendo o
+    // grupo (ex.: "Saude e bem-estar") para o filtro do catalogo; estas duas
+    // guardam o caminho completo e as secundarias, que alimentam a busca.
+    categoryMain: text("category_main"),
+    categoriesSecondary: jsonb("categories_secondary"),
     language: text("language").notNull().default("pt-BR"),
     isbn: text("isbn"),
     collection: text("collection"),
@@ -186,6 +191,10 @@ export const ebookDrafts = pgTable("ebook_drafts", {
   ownerEmail: text("owner_email").notNull(),
   origin: text("origin").notNull().default("ia"),
   category: text("category").notNull().default("geral"),
+  // Classificacao hierarquica; acompanha o rascunho para chegar intacta ao
+  // livro publicado, onde alimenta a busca do catalogo.
+  categoryMain: text("category_main"),
+  categoriesSecondary: jsonb("categories_secondary"),
   title: text("title").notNull().default(""),
   titleMode: text("title_mode").notNull().default("ai"),
   subtitle: text("subtitle").notNull().default(""),
