@@ -42,3 +42,13 @@ next-env.d.ts
 /work/
 
 *.tsbuildinfo
+
+/dist-native/
+/android/.gradle/
+/android/local.properties
+/android/**/build/
+/android/app/src/main/assets/public/
+/ios/App/App/public/
+/ios/DerivedData/
+*.keystore
+*.jks

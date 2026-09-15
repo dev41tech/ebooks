@@ -1,7 +1,8 @@
 "use client";
+import { apiFetch, serviceUrl } from "./lib/client-api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type User = { name: string; email: string; admin: boolean; participant: boolean } | null;
+export type User = { name: string; email: string; admin: boolean; participant: boolean } | null;
 type View = "home" | "catalog" | "library" | "detail" | "reader" | "profile" | "admin";
 type Book = { id: string; title: string; author: string; genre: string; description: string; format?: string; status: string; publishedAt?: string; coverKey?: string; language?: string; };
 type Section = { id: string; body: string[]; minutes: number };
@@ -10,7 +11,7 @@ type ApiPayload = { recommendations?:{bookId:string;reason:string}[]; configured
 const NAV: { id: View; label: string }[] = [{id:"home",label:"Início"},{id:"catalog",label:"Explorar"},{id:"library",label:"Minha biblioteca"}];
 const messages: Record<string,string> = { master_required:"Digite a senha master para abrir a administração.", master_password_length:"Use uma senha entre 12 e 128 caracteres.", master_invalid_password:"Senha master incorreta.", master_rate_limited:"Muitas tentativas. Aguarde 15 minutos antes de tentar novamente.", master_already_configured:"A senha master já foi criada. Recarregue a página e entre com ela.", master_setup_required:"Crie a senha master no primeiro acesso.", sign_in_required:"Entre na sua conta para continuar.", invitation_required:"Esta conta ainda não está na lista de participantes do beta.", admin_required:"Esta área é exclusiva da administração.", invalid_book_content:"O arquivo não pôde ser lido. Confira o EPUB (até 32 MB) ou PDF antes de publicar.", review_required:"Publique esta obra pela revisão da importação.", published_import_protected:"Esta importação possui uma obra vinculada. Seus arquivos estão protegidos.", book_file_required:"Selecione um arquivo válido para o livro.", review_incomplete:"Confira os dados e confirme os direitos para publicar." };
 async function requestJson(url: string, options?: RequestInit) {
-  const response = await fetch(url, options);
+  const response = await apiFetch(url, options);
   const data = await response.json().catch(() => ({error:"invalid_response"})) as ApiPayload;
   if(data.error === "master_required") window.dispatchEvent(new Event("sambu-master-locked"));
   if (!response.ok || data.error) throw new Error(messages[data.error || ""] || data.message || "Não foi possível concluir. Tente novamente.");
@@ -19,7 +20,7 @@ async function requestJson(url: string, options?: RequestInit) {
 function Cover({book}:{book:Book}) {
   const [failed,setFailed] = useState(false);
   useEffect(()=>setFailed(false),[book.id]);
-  return <div className="beta-cover">{failed ? <span>{book.title}<small>{book.author}</small></span> : <img src={`/api/catalog/cover?id=${encodeURIComponent(book.id)}`} alt={`Capa de ${book.title}`} loading="lazy" onError={()=>setFailed(true)}/>}</div>;
+  return <div className="beta-cover">{failed ? <span>{book.title}<small>{book.author}</small></span> : <img src={serviceUrl(`/api/catalog/cover?id=${encodeURIComponent(book.id)}`)} alt={`Capa de ${book.title}`} loading="lazy" onError={()=>setFailed(true)}/>}</div>;
 }
 function BookCard({book,onOpen,onFavorite,saved}:{book:Book;onOpen:()=>void;onFavorite:()=>void;saved:boolean}) {
   return <article className="book-card beta-card"><button className="book-open" onClick={onOpen}><Cover book={book}/><h3>{book.title}</h3><p>{book.author}</p><small>{book.genre}</small></button><button className="favorite-control" aria-label={`${saved ? "Remover dos" : "Adicionar aos"} favoritos: ${book.title}`} aria-pressed={saved} onClick={onFavorite}>{saved ? "♥" : "♡"}</button></article>;
@@ -96,7 +97,7 @@ export default function SambuApp({user}:{user:User}) {
   }
   useEffect(()=>{if(!user?.participant||view==="reader")return;let active=true;const refresh=()=>{if(document.visibilityState!=="visible")return;requestJson("/api/progress",{cache:"no-store"}).then(d=>{if(active)setLocations(d.locations||{});}).catch(()=>{});};refresh();window.addEventListener("focus",refresh);document.addEventListener("visibilitychange",refresh);return()=>{active=false;window.removeEventListener("focus",refresh);document.removeEventListener("visibilitychange",refresh);};},[user?.email,user?.participant,view]);
   const save = useCallback(async(bookId:string,location:Location):Promise<Location>=>{
-    const response=await fetch("/api/progress",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({bookId,...location}),keepalive:true,cache:"no-store"});
+    const response=await apiFetch("/api/progress",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({bookId,...location}),keepalive:true,cache:"no-store"});
     const data=await response.json() as {location?:Location};
     if(response.status===409&&data.location){setLocations(current=>({...current,[bookId]:data.location!}));throw Object.assign(new Error("Leitura atualizada em outro dispositivo."),{location:data.location});}
     if(!response.ok||!data.location)throw new Error("Não foi possível salvar a leitura.");
@@ -160,13 +161,13 @@ function HomeBookRail({books,favorites,onOpen,onFavorite}:{books:Book[];favorite
   return <><div className="r3-book-rail" ref={rail} aria-label="Novidades no acervo">{books.map(b=><BookCard key={b.id} book={b} saved={favorites.includes(b.id)} onOpen={()=>onOpen(b)} onFavorite={()=>onFavorite(b.id)}/>)}</div>{!(edges.start&&edges.end)&&<div className="r3-rail-controls"><button aria-label="Ver livros anteriores" disabled={edges.start} onClick={()=>rail.current?.scrollBy({left:-rail.current.clientWidth*.8,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})}>←</button><button aria-label="Ver próximos livros" disabled={edges.end} onClick={()=>rail.current?.scrollBy({left:rail.current.clientWidth*.8,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})}>→</button></div>}</>;
 }
 function AccessNotice({user,admin=false}:{user:User;admin?:boolean}) {
-  return <section className="library-empty"><h2>{!user?"Entre para continuar":admin?"Acesso administrativo restrito":"Acesso por convite"}</h2><p>{!user?"Use a conta informada no convite do beta.":admin?"Sua conta não possui permissão para administrar o acervo.":"Solicite à equipe Sambu a inclusão do seu email entre os participantes."}</p>{!user&&<a className="primary" href="/signin-with-chatgpt?return_to=%2F%3Fview%3Dprofile">Entrar com ChatGPT</a>}</section>;
+  return <section className="library-empty"><h2>{!user?"Entre para continuar":admin?"Acesso administrativo restrito":"Acesso por convite"}</h2><p>{!user?"Use a conta informada no convite do beta.":admin?"Sua conta não possui permissão para administrar o acervo.":"Solicite à equipe Sambu a inclusão do seu email entre os participantes."}</p>{!user&&<a className="primary" href={serviceUrl("/signin-with-chatgpt?return_to=%2F%3Fview%3Dprofile")}>Entrar com ChatGPT</a>}</section>;
 }
 function Profile({user,notify}:{user:User;notify:(s:string)=>void}) {
   const [name,setName]=useState(user?.name||""),[busy,setBusy]=useState(false);
   useEffect(()=>{if(user)requestJson("/api/profile").then(d=>setName(d.profile?.displayName||user.name)).catch(e=>notify(e.message));},[user,notify]);
   if(!user)return <main className="page"><AccessNotice user={user}/></main>;
-  return <main className="page"><h1>Minha conta</h1><p>{user.email}</p><p>{user.admin?"Administrador":user.participant?"Participante do beta":"Conta identificada · convite pendente"}</p><form className="beta-form" onSubmit={async e=>{e.preventDefault();setBusy(true);try{await requestJson("/api/profile",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({displayName:name})});notify("Nome salvo com sucesso.");}catch(e){notify((e as Error).message);}finally{setBusy(false);}}}><label>Nome de exibição<input value={name} required maxLength={80} onChange={e=>setName(e.target.value)}/></label><button className="primary" disabled={busy}>{busy?"Salvando…":"Salvar nome"}</button></form><p>O beta é gratuito. Nenhuma assinatura ou cobrança é iniciada aqui.</p><a href="/signout-with-chatgpt?return_to=%2F">Sair da conta</a></main>;
+  return <main className="page"><h1>Minha conta</h1><p>{user.email}</p><p>{user.admin?"Administrador":user.participant?"Participante do beta":"Conta identificada · convite pendente"}</p><form className="beta-form" onSubmit={async e=>{e.preventDefault();setBusy(true);try{await requestJson("/api/profile",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({displayName:name})});notify("Nome salvo com sucesso.");}catch(e){notify((e as Error).message);}finally{setBusy(false);}}}><label>Nome de exibição<input value={name} required maxLength={80} onChange={e=>setName(e.target.value)}/></label><button className="primary" disabled={busy}>{busy?"Salvando…":"Salvar nome"}</button></form><p>O beta é gratuito. Nenhuma assinatura ou cobrança é iniciada aqui.</p><a href={serviceUrl("/signout-with-chatgpt?return_to=%2F")}>Sair da conta</a></main>;
 }
 function Reader({book,sections,initial,theme,font,preference,onSave,onBack}:{book:Book;sections:Section[];initial:Location;theme:string;font:number;preference:(t:string,f:number)=>void;onSave:(id:string,l:Location)=>Promise<Location>;onBack:()=>void}) {
   const paragraphs=useMemo(()=>sections.flatMap(s=>s.body),[sections]);
@@ -198,7 +199,7 @@ function Reader({book,sections,initial,theme,font,preference,onSave,onBack}:{boo
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[book.id,apply,persist]);
   return <main className={`reader ${theme}`}><div className="reader-top"><button onClick={async()=>{if(timer.current)clearTimeout(timer.current);const ok=await persist(currentRef.current);if(ok)onBack();}}>← Voltar</button><b>{book.title}</b><div className="reader-controls">{!pdf&&<><button aria-label="Diminuir fonte" onClick={()=>preference(theme,Math.max(16,font-2))}>A−</button><button aria-label="Aumentar fonte" onClick={()=>preference(theme,Math.min(32,font+2))}>A+</button><select aria-label="Tema do leitor" value={theme} onChange={e=>preference(e.target.value,font)}><option value="light">Claro</option><option value="sepia">Sépia</option><option value="dark">Escuro</option></select></>}</div></div>
-    {pdf?<section className="pdf-reader"><p>Para retomar um PDF, informe e salve a página exibida no visualizador.</p><label>Página <input type="number" min={1} max={100000} value={pdfPage} onChange={e=>{const position=Math.max(1,Math.min(100000,Number(e.target.value)||1));setPdfPage(position);currentRef.current={position,progress:currentRef.current.progress||1,revision:revision.current};dirty.current=true;}}/></label><button className="outline" onClick={()=>persist(currentRef.current)}>Salvar posição</button><iframe title={`Leitura de ${book.title}`} src={`/api/catalog/file?id=${encodeURIComponent(book.id)}#page=${pdfPage}`}/></section>:<article style={{fontSize:font}}>{paragraphs.map((p,i)=><p data-reader-position={i} id={`paragraph-${i}`} key={i}>{p}</p>)}<div className="reader-end"><button className="outline" onClick={()=>persist(currentRef.current)}>Salvar posição</button><button className="primary" onClick={async()=>{if(timer.current)clearTimeout(timer.current);const end={position:Math.max(0,paragraphs.length-1),progress:100};currentRef.current=end;dirty.current=true;setCurrent(end);await persist(end);}}>Concluir leitura</button></div></article>}
+    {pdf?<section className="pdf-reader"><p>Para retomar um PDF, informe e salve a página exibida no visualizador.</p><label>Página <input type="number" min={1} max={100000} value={pdfPage} onChange={e=>{const position=Math.max(1,Math.min(100000,Number(e.target.value)||1));setPdfPage(position);currentRef.current={position,progress:currentRef.current.progress||1,revision:revision.current};dirty.current=true;}}/></label><button className="outline" onClick={()=>persist(currentRef.current)}>Salvar posição</button><iframe title={`Leitura de ${book.title}`} src={serviceUrl(`/api/catalog/file?id=${encodeURIComponent(book.id)}#page=${pdfPage}`)}/></section>:<article style={{fontSize:font}}>{paragraphs.map((p,i)=><p data-reader-position={i} id={`paragraph-${i}`} key={i}>{p}</p>)}<div className="reader-end"><button className="outline" onClick={()=>persist(currentRef.current)}>Salvar posição</button><button className="primary" onClick={async()=>{if(timer.current)clearTimeout(timer.current);const end={position:Math.max(0,paragraphs.length-1),progress:100};currentRef.current=end;dirty.current=true;setCurrent(end);await persist(end);}}>Concluir leitura</button></div></article>}
     <div className="beta-reader-status" role="status">{state||`${current.progress}% lido`}</div></main>;
 }
 function MasterGate({owner,notify,onChange}:{owner:string;notify:(s:string)=>void;onChange:()=>Promise<unknown>}) {
@@ -266,7 +267,7 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
   const [uploadStage, setUploadStage] = useState("");
 
   async function load() {
-    const response = await fetch("/api/admin/imports");
+    const response = await apiFetch("/api/admin/imports");
     if (!response.ok) throw new Error("Não foi possível carregar as importações.");
     const data = await response.json() as ApiPayload;
     setBatches(data.batches || []);
@@ -285,7 +286,7 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
     let initialized: ApiPayload;
     if (resumed) initialized = { ...resumed, batch: { validItems:0,errorItems:0 } };
     else {
-      const initResponse = await fetch("/api/admin/uploads?v=3", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"init",fileName:file.name,contentType:file.type,size:file.size})});
+      const initResponse = await apiFetch("/api/admin/uploads?v=3", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"init",fileName:file.name,contentType:file.type,size:file.size})});
       initialized = await initResponse.json().catch(()=>({})) as ApiPayload;
       if (!initResponse.ok) throw new Error(initialized.error || `init_${initResponse.status}`);
     }
@@ -305,7 +306,7 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
       const chunk = file.slice(part * chunkSize, (part + 1) * chunkSize);
       let response: Response | undefined;
       for (let attempt = 0; attempt < 3; attempt++) {
-      try { response = await fetch("/api/admin/uploads?v=3", {
+      try { response = await apiFetch("/api/admin/uploads?v=3", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -327,7 +328,7 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
     }
 
     setUploadStage("Finalizando o ebook…");
-    const completeResponse = await fetch("/api/admin/uploads?v=3", {
+    const completeResponse = await apiFetch("/api/admin/uploads?v=3", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -362,7 +363,7 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
         requestForm.set("uploadedFiles", JSON.stringify([uploaded]));
       }
       setUploadStage("Registrando na fila de revisão…");
-      const response = await fetch("/api/admin/imports?v=3", {
+      const response = await apiFetch("/api/admin/imports?v=3", {
         method: "POST",
         body: requestForm,
       });
@@ -407,7 +408,7 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
     );
     setBusy(true);
     try {
-    const response = await fetch("/api/admin/imports", {
+    const response = await apiFetch("/api/admin/imports", {
       method: "PATCH",
       body: form,
     });
@@ -438,7 +439,7 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
     if (!window.confirm(`Arquivar a importação de “${item.title}”?`)) return;
     setBusy(true);
     try {
-    const response = await fetch(
+    const response = await apiFetch(
       `/api/admin/imports?id=${encodeURIComponent(item.id)}`,
       { method: "DELETE" },
     );
@@ -908,7 +909,7 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
                   {selected.fileName && (
                     <a
                       className="outline preview-link"
-                      href={`/api/admin/imports?file=${encodeURIComponent(selected.id)}`}
+                      href={serviceUrl(`/api/admin/imports?file=${encodeURIComponent(selected.id)}`)}
                       target="_blank"
                       rel="noreferrer"
                     >
