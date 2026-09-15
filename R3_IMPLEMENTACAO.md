@@ -78,3 +78,13 @@ As recomendações usam afinidade de palavras nos títulos/sinopses, gênero, au
 A migração `0008_overrated_blazing_skull.sql` adiciona buscas por conta. Mantém até 12 consultas distintas e considera apenas os últimos 90 dias; buscas seguintes removem registros antigos. Visitantes não têm buscas gravadas. A busca textual é registrada após uma pausa de um segundo ou envio pela página inicial; seleção de gênero também contribui. Cada conta acessa somente suas próprias sugestões.
 
 Validação: TypeScript, build, renderização e 15 testes de integração aprovados, incluindo afinidade, exclusões, gravação de buscas limitada e isolamento entre contas.
+
+## Correção: retomada entre web e mobile
+
+O leitor consulta a posição da conta sem cache sempre que o livro é aberto, inclusive pelo histórico do navegador. Ao retornar à aba, sincroniza a posição; a biblioteca também atualiza seus percentuais ao voltar ao primeiro plano. A posição EPUB é um parágrafo do conteúdo, independente do tamanho da tela. Em PDF, continua sendo a página informada manualmente.
+
+A migração `0009_nice_risque.sql` acrescenta uma revisão numérica ao progresso. Cada gravação compara sua revisão com a do servidor em uma operação atômica. Uma aba desatualizada recebe a posição atual em vez de sobrescrevê-la. A posição pode recuar intencionalmente quando a revisão está atualizada; não usamos simplesmente o maior percentual.
+
+O leitor salva somente alterações reais, após pausa na rolagem, e tenta finalizar a gravação ao sair/ocultar a página usando keepalive. Não há garantia de entrega se o navegador for encerrado abruptamente ou estiver sem conexão; a mensagem “Posição sincronizada com sua conta” confirma a gravação. Após esta atualização, recarregar os dois aparelhos. Uma aba com código antigo será bloqueada ao tentar sobrescrever uma revisão mais nova.
+
+Validação: 16 testes de integração aprovados, incluindo dois clientes da mesma conta, conflito de revisão e retomada. Não houve teste desta alteração em dois aparelhos físicos.

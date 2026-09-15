@@ -77,7 +77,7 @@ test('favorites persist, remain unique and can be removed',async()=>{
 });
 test('reading position persists independently of percentage and rejects invalid values',async()=>{
  identity.email=reader;assert.equal((await routes.progress.POST(payload({bookId:publishedId,position:1,progress:47}))).status,200);
- assert.deepEqual((await (await routes.progress.GET()).json()).locations[publishedId],{position:1,progress:47});
+ assert.deepEqual((await (await routes.progress.GET()).json()).locations[publishedId],{position:1,progress:47,revision:1});
  assert.equal((await routes.progress.POST(payload({bookId:publishedId,position:-1,progress:150}))).status,400);
 });
 test('profile PATCH persists name without granting admin access',async()=>{
@@ -148,4 +148,16 @@ test('recent searches personalize only their owner and remain bounded',async()=>
  identity.email=admin;const other=await (await routes.recommendations.GET()).json();assert.ok(other.recommendations.every(r=>r.reason!=='Combina com suas buscas recentes'));
  identity.email=null;assert.equal((await routes.recommendations.GET()).status,401);
  assert.equal((await routes.recommendations.POST(payload({query:'Receitas'}))).status,401);
+});
+
+test('web and mobile resume the same position and stale device writes cannot overwrite it',async()=>{
+ identity.email=reader;
+ const web=(await (await routes.progress.GET()).json()).locations[publishedId];
+ const mobile={...web};
+ const response=await routes.progress.POST(payload({bookId:publishedId,position:25,progress:70,revision:mobile.revision}));assert.equal(response.status,200);
+ const latest=(await response.json()).location;
+ const stale=await routes.progress.POST(payload({bookId:publishedId,position:2,progress:10,revision:web.revision}));assert.equal(stale.status,409);assert.deepEqual((await stale.json()).location,latest);
+ const reopened=await routes.progress.GET();assert.equal(reopened.headers.get('cache-control'),'no-store');assert.deepEqual((await reopened.json()).locations[publishedId],latest);
+ const reread=await routes.progress.POST(payload({bookId:publishedId,position:12,progress:35,revision:latest.revision}));assert.equal(reread.status,200);
+ assert.equal((await (await routes.progress.GET()).json()).locations[publishedId].position,12);
 });

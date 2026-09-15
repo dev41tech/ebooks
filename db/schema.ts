@@ -67,6 +67,7 @@ export const readingProgress = sqliteTable(
     chapter: integer("chapter").notNull().default(0),
     progress: integer("progress").notNull().default(0),
     position: integer("position").notNull().default(0),
+    revision: integer("revision").notNull().default(0),
     updatedAt: text("updated_at").notNull(),
   },
   (t) => [uniqueIndex("progress_owner_book_idx").on(t.userEmail, t.bookId)],
