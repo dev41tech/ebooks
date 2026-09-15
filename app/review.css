@@ -691,3 +691,6 @@
  .beta-app .book-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
  .beta-app .page { padding:30px 18px 70px; }
 }
+
+.master-login {max-width:480px;margin:2rem auto;padding:1.5rem;}
+.master-toolbar {display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;}

@@ -233,3 +233,20 @@ export const stagingBooks = sqliteTable(
     ),
   ],
 );
+
+export const masterCredentials = sqliteTable("master_credentials", {
+  id: text("id").primaryKey(),
+  salt: text("salt").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+export const masterSessions = sqliteTable("master_sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  email: text("email").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+});
+export const masterAttempts = sqliteTable("master_attempts", {
+  email: text("email").primaryKey(),
+  attempts: integer("attempts").notNull(),
+  windowStart: integer("window_start").notNull(),
+});

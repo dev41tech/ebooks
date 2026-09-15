@@ -58,3 +58,13 @@ Onze testes de integração cobrem bloqueio por perfil, publicação concorrente
 O pacote é uma base implementada para homologação. A liberação do teste de mercado exige configuração do destino e validação com contas e acervo reais.
 
 Resultado desta entrega: TypeScript e build aprovados; 11/11 testes de integração e 1/1 teste de renderização aprovados. No navegador local, busca e ordenação foram verificadas com dois registros de homologação, ausentes do pacote.
+
+## Atualização: senha master da administração
+
+A administração agora exige a conta autorizada e uma senha master adicional. No primeiro acesso, o administrador cria a senha (12–128 caracteres) no próprio aplicativo. Não há senha padrão. O acesso é mantido por duas horas em cookie Secure, HttpOnly e SameSite=Strict e pode ser encerrado em “Bloquear administração”.
+
+A senha é armazenada somente como derivação PBKDF2-SHA256 com salt aleatório; os tokens de sessão ficam como hashes no banco e são vinculados à conta. Após cinco tentativas, novas verificações são bloqueadas até o fim da janela de 15 minutos. O servidor exige a sessão master em todas as APIs administrativas, inclusive importações e mídia. A nova migração é `0007_small_the_renegades.sql`.
+
+Não há recuperação automática de senha nesta versão; guarde a senha em seu gerenciador. A redefinição, se necessária, deverá ser realizada pelo responsável autorizado pela hospedagem, revogando também as sessões existentes.
+
+Validação desta atualização: TypeScript aprovado e 13 testes de integração aprovados, incluindo bloqueio sem sessão, senha inválida, autorização por conta, origem das requisições, expiração, encerramento de sessão e limite de tentativas.

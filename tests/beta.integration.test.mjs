@@ -36,11 +36,14 @@ before(async()=>{
    for(const statement of sql.split(';').map(s=>s.replace(/--> statement-breakpoint/g,'').trim()).filter(Boolean))await db.prepare(statement).run();
  }
  const runtimePath=path.join(root,'tests/test-runtime.mjs');
- for(const [name,file] of Object.entries({books:'admin/books',imports:'admin/imports',catalog:'catalog',content:'catalog/content',file:'catalog/file',favorites:'favorites',progress:'progress',profile:'profile',subscription:'subscription'})) {
+ for(const [name,file] of Object.entries({books:'admin/books',imports:'admin/imports',catalog:'catalog',content:'catalog/content',file:'catalog/file',favorites:'favorites',progress:'progress',profile:'profile',subscription:'subscription',master:'admin/master'})) {
   const outfile=path.join(output,`${name}.mjs`);
   await build({entryPoints:[path.join(root,`app/api/${file}/route.ts`)],outfile,bundle:true,platform:'node',format:'esm',packages:'external',plugins:[{name:'isolated-runtime',setup(b){b.onResolve({filter:/^(cloudflare:workers|next\/headers|next\/navigation)$/},()=>({path:runtimePath,external:true}));}}]});
   routes[name]=await import(pathToFileURL(outfile));
  }
+ identity.email=admin;
+ const setup=await routes.master.POST(new Request('https://sambu.test/api/admin/master',{method:'POST',headers:{'content-type':'application/json',origin:'https://sambu.test'},body:JSON.stringify({action:'setup',password:'Isolated-test-master-2026'})}));
+ assert.equal(setup.status,200);identity.cookie=setup.headers.get('set-cookie').split(';')[0];
 });
 after(async()=>{await runtime?.dispose();await rm(output,{recursive:true,force:true});});
 test('visitor and reader cannot administer; uninvited account cannot read',async()=>{
@@ -90,4 +93,29 @@ test('archiving an unpublished import preserves its source file',async()=>{
 });
 test('beta does not create a fake subscription',async()=>{
  identity.email=reader;assert.equal((await routes.subscription.POST(payload({plan:'immersive_monthly'}))).status,409);assert.equal((await db.prepare('SELECT count(*) AS n FROM subscriptions').first()).n,0);
+});
+
+const masterRequest = (action,password='Isolated-test-master-2026',origin='https://sambu.test') => new Request('https://sambu.test/api/admin/master',{method:'POST',headers:{'content-type':'application/json',origin},body:JSON.stringify({action,password})});
+test('master session requires allowlisted identity, valid cookie and same-origin login',async()=>{
+ identity.email=admin;const saved=identity.cookie;identity.cookie='';
+ assert.equal((await routes.books.GET()).status,403);
+ assert.equal((await routes.master.GET()).status,200);
+ assert.equal((await routes.master.POST(masterRequest('login','Isolated-test-master-2026','https://evil.test'))).status,403);
+ assert.equal((await routes.master.POST(masterRequest('login','Wrong-password-2026'))).status,401);
+ const success=await routes.master.POST(masterRequest('login'));assert.equal(success.status,200);
+ const cookie=success.headers.get('set-cookie');assert.match(cookie,/HttpOnly/);assert.match(cookie,/Secure/);assert.match(cookie,/SameSite=Strict/);
+ identity.cookie=cookie.split(';')[0];assert.equal((await routes.books.GET()).status,200);
+ identity.email=reader;assert.equal((await routes.master.POST(masterRequest('login'))).status,403);
+ identity.email=admin;assert.equal((await routes.master.POST(masterRequest('setup'))).status,409);
+ assert.equal((await routes.master.POST(masterRequest('logout'))).status,200);
+ assert.equal((await routes.books.GET()).status,403);
+ identity.cookie=saved;await db.prepare('UPDATE master_sessions SET expires_at=0').run();
+ assert.equal((await routes.books.GET()).status,403);
+});
+test('master login limits repeated failures and does not store cleartext passwords',async()=>{
+ identity.email=admin;identity.cookie='';await db.prepare('DELETE FROM master_attempts').run();
+ for(let i=0;i<5;i++)assert.equal((await routes.master.POST(masterRequest('login','Wrong-password-2026'))).status,401);
+ assert.equal((await routes.master.POST(masterRequest('login'))).status,429);
+ const credential=await db.prepare('SELECT * FROM master_credentials').first();
+ assert.equal(credential.password_hash.length,64);assert.notEqual(credential.password_hash,'Isolated-test-master-2026');
 });
