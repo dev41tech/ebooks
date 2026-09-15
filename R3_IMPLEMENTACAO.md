@@ -1,0 +1,60 @@
+# Sambu R3 Beta — implementação sobre a base R2
+
+Versão do código: 0.3.0. Data: 15/09/2026.
+
+Esta entrega implementa as correções na base R2 recuperada. Não representa uma cópia do código atualmente publicado em ebooks.41tech.cloud e não foi publicada nesse domínio. O registro documental R3 anterior continua separado desta implementação.
+
+## O que mudou
+
+- Catálogo consultado no banco, com busca, gênero, ordenação por título/data e estados de carregamento, erro e acervo vazio. Apenas obras publicadas aparecem.
+- Favoritos persistidos por conta e botão independente da abertura do livro.
+- EPUB com leitura por parágrafos, tamanho de fonte, temas, posição e percentual salvos. A posição é gravada após pausa na rolagem e pode ser salva manualmente.
+- PDF exibido com campo de página salva manualmente; não há detecção automática da página do visualizador.
+- Perfil usa a conta autenticada e permite atualizar o nome.
+- Beta gratuito, com participantes e administradores definidos por listas no servidor. APIs verificam as permissões; esconder um botão não concede acesso.
+- Removidos da interface os livros fictícios, avaliações artificiais, planos de demonstração e promessas de áudio/offline. A API bloqueia criação de assinaturas simuladas.
+- Importação com retomada de envio em partes, revisão de metadados, confirmação de direitos, validação de PDF/EPUB e publicação idempotente. Publicações simultâneas não duplicam a obra.
+- Arquivamento de importações conserva arquivos e bloqueia remoção de registros ligados a obras publicadas.
+- Limites de extração do EPUB e cache de conteúdo na publicação reduzem processamento e exposição a arquivos excessivos.
+
+## Instalação e validação
+
+Requer Node 22.13 ou posterior e ambiente compatível com Vinext/Cloudflare Workers, D1 e R2. Não é um pacote para hospedagem puramente estática.
+
+```sh
+npm ci
+npm run typecheck
+npm test
+```
+
+`npm test` gera o build, verifica a renderização e executa os testes de integração. `npm run test:beta` executa somente os testes do beta. Os testes usam banco e armazenamento isolados; não alteram o acervo de produção.
+
+## Configuração antes de disponibilizar aos convidados
+
+1. Identificar a hospedagem que realmente atende ebooks.41tech.cloud. O identificador do projeto Sites original foi removido do manifesto desta cópia para evitar publicação no projeto errado.
+2. Configurar os bindings D1 `DB` e R2 `BUCKET` no ambiente de destino. Não estão incluídos banco, livros, usuários ou credenciais de produção.
+3. Fazer backup do banco existente e aplicar as migrações pendentes. Banco novo: todas as migrações em `drizzle/`. Banco já com 0000–0005: aplicar `0006_robust_silvermane.sql`, que adiciona a posição da leitura.
+4. Integrar autenticação verificada em `app/chatgpt-auth.ts`. O adaptador atual só aceita o gateway autenticado do Sites quando `SAMBU_AUTH_MODE=sites`. Em outro servidor, é necessário substituir a obtenção da identidade por sessão/token validado e adaptar as rotas de entrada/saída. **Não habilitar o modo Sites aceitando cabeçalhos enviados diretamente pelo navegador**: isso permitiria falsificar identidades. Por padrão, sem configuração, o acesso fica como visitante.
+5. Configurar `SAMBU_ADMIN_EMAILS` e `SAMBU_BETA_EMAILS` com emails separados por vírgulas. Administradores têm acesso ao beta. As listas ficam vazias por padrão.
+6. Importar um pequeno acervo autorizado, revisar metadados e testar leitura com contas reais de administrador, participante e pessoa não convidada no ambiente de homologação.
+7. Definir canal de suporte, política de privacidade e rotina de backup/monitoramento antes de convidar o grupo piloto. Esses serviços operacionais não são provisionados por este pacote.
+
+`.env.example` documenta as variáveis, mas elas precisam ser configuradas como variáveis do Worker no destino; o arquivo sozinho não provisiona serviços nem autenticação.
+
+## Limitações conhecidas
+
+- EPUB é convertido para texto por parágrafos. Imagens internas, diagramação editorial e navegação avançada por capítulos não estão preservadas integralmente.
+- A prévia de importação abre o arquivo original; não existe leitor EPUB integrado à revisão administrativa.
+- PDF usa marcação manual de página. EPUB aceita até 32 MB, PDF até 250 MB na importação; substituição pelo editor aceita até 32 MB. Capas aceitam JPEG, PNG e WebP até 8 MB.
+- Retomada do upload depende do mesmo navegador/conta e do mesmo arquivo. Arquivos de 250 MB e falhas prolongadas de rede ainda precisam de ensaio na infraestrutura final.
+- Arquivos arquivados são conservados; não há rotina automática de limpeza do armazenamento.
+- Não inclui cobrança, áudio, downloads offline, analytics de produto ou gestão de convites por email.
+- Autenticação real e uso em múltiplos dispositivos dependem da configuração de hospedagem. A persistência foi verificada nas APIs em ambiente isolado; o fluxo completo de login de produção não foi validado nesta implementação.
+
+## Escopo dos testes automatizados
+
+Onze testes de integração cobrem bloqueio por perfil, publicação concorrente, filtragem pública, proteção do arquivo publicado, leitura por convite, favoritos, progresso, perfil sem elevação de privilégios, EPUB inválido, arquivamento e assinaturas desabilitadas. Há também uma verificação de renderização do build e checagem estática TypeScript.
+
+O pacote é uma base implementada para homologação. A liberação do teste de mercado exige configuração do destino e validação com contas e acervo reais.
+
+Resultado desta entrega: TypeScript e build aprovados; 11/11 testes de integração e 1/1 teste de renderização aprovados. No navegador local, busca e ordenação foram verificadas com dois registros de homologação, ausentes do pacote.

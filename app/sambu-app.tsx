@@ -1,0 +1,908 @@
+"use client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+type User = { name: string; email: string; admin: boolean; participant: boolean } | null;
+type View = "home" | "catalog" | "library" | "detail" | "reader" | "profile" | "admin";
+type Book = { id: string; title: string; author: string; genre: string; description: string; format?: string; status: string; publishedAt?: string; coverKey?: string; language?: string; };
+type Section = { id: string; body: string[]; minutes: number };
+type Location = { position: number; progress: number };
+type ApiPayload = { error?: string; message?: string; books?: Book[]; chapters?: Section[]; profile?: { displayName?: string }; favorites?: string[]; locations?: Record<string,Location>; batches?: ImportBatch[]; items?: StagedBook[]; uploadId?: string; chunkSize?: number; batch: { validItems:number; errorItems:number }; publishedBookId?:string; storageKey?:string; fileName?:string; contentType?:string; fileSize?:number };
+const NAV: { id: View; label: string }[] = [{id:"home",label:"Início"},{id:"catalog",label:"Explorar"},{id:"library",label:"Minha biblioteca"}];
+const messages: Record<string,string> = { sign_in_required:"Entre na sua conta para continuar.", invitation_required:"Esta conta ainda não está na lista de participantes do beta.", admin_required:"Esta área é exclusiva da administração.", invalid_book_content:"O arquivo não pôde ser lido. Confira o EPUB (até 32 MB) ou PDF antes de publicar.", review_required:"Publique esta obra pela revisão da importação.", published_import_protected:"Esta importação possui uma obra vinculada. Seus arquivos estão protegidos.", book_file_required:"Selecione um arquivo válido para o livro.", review_incomplete:"Confira os dados e confirme os direitos para publicar." };
+async function requestJson(url: string, options?: RequestInit) {
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({error:"invalid_response"})) as ApiPayload;
+  if (!response.ok || data.error) throw new Error(messages[data.error || ""] || data.message || "Não foi possível concluir. Tente novamente.");
+  return data;
+}
+function Cover({book}:{book:Book}) {
+  const [failed,setFailed] = useState(false);
+  useEffect(()=>setFailed(false),[book.id]);
+  return <div className="beta-cover">{failed ? <span>{book.title}<small>{book.author}</small></span> : <img src={`/api/catalog/cover?id=${encodeURIComponent(book.id)}`} alt={`Capa de ${book.title}`} loading="lazy" onError={()=>setFailed(true)}/>}</div>;
+}
+function BookCard({book,onOpen,onFavorite,saved}:{book:Book;onOpen:()=>void;onFavorite:()=>void;saved:boolean}) {
+  return <article className="book-card beta-card"><button className="book-open" onClick={onOpen}><Cover book={book}/><h3>{book.title}</h3><p>{book.author}</p><small>{book.genre}</small></button><button className="favorite-control" aria-label={`${saved ? "Remover dos" : "Adicionar aos"} favoritos: ${book.title}`} aria-pressed={saved} onClick={onFavorite}>{saved ? "♥" : "♡"}</button></article>;
+}
+export default function SambuApp({user}:{user:User}) {
+  const [view,setView] = useState<View>("home");
+  const booksRef = useRef<Book[]>([]);
+  const [books,setBooks] = useState<Book[]>([]), [selected,setSelected] = useState<Book|null>(null);
+  const [sections,setSections] = useState<Section[]>([]), [favorites,setFavorites] = useState<string[]>([]);
+  const [locations,setLocations] = useState<Record<string,Location>>({});
+  const [query,setQuery] = useState(""), [genre,setGenre] = useState("Todos"), [sort,setSort] = useState("recent");
+  const [loading,setLoading] = useState(true), [error,setError] = useState(""), [toast,setToast] = useState("");
+  const [readingBusy,setReadingBusy] = useState(false), [favoriteBusy,setFavoriteBusy] = useState(false);
+  const [theme,setTheme] = useState("sepia"), [font,setFont] = useState(20);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const notify = useCallback((text:string)=>{setToast(text);if(toastTimer.current)clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(""),6000);},[]);
+  const navigate = useCallback((next:View,book?:Book)=>{
+    setView(next); if(book)setSelected(book);
+    const url = new URL(window.location.href);url.search="";url.searchParams.set("view",next);
+    if(book)url.searchParams.set("book",book.id);
+    if (url.href !== window.location.href) window.history.pushState({},"",url);window.scrollTo(0,0);
+  },[]);
+  const load = useCallback(async()=>{
+    setLoading(true);setError("");
+    try { const data=await requestJson("/api/catalog");setBooks(data.books||[]);booksRef.current=data.books||[];return data.books as Book[]; }
+    catch(e){setError((e as Error).message);return null;}
+    finally{setLoading(false);}
+  },[]);
+  const startReading = useCallback(async(book:Book)=>{
+    if(!user){notify("Entre na sua conta para ler.");navigate("profile");return;}
+    if(!user.participant){notify(messages.invitation_required);navigate("profile");return;}
+    setReadingBusy(true);
+    try {
+      if(book.format?.toUpperCase().includes("PDF")){setSections([]);navigate("reader",book);}
+      else {const data=await requestJson(`/api/catalog/content?id=${encodeURIComponent(book.id)}`);if(!data.chapters?.length)throw new Error("Este livro não possui conteúdo legível.");setSections(data.chapters);navigate("reader",book);}
+    }catch(e){notify((e as Error).message);}finally{setReadingBusy(false);}
+  },[user,navigate,notify]);
+  useEffect(()=>{
+    let active=true;
+    const restore=async()=>{
+      const rows=await load();if(!active||!rows)return;
+      if(user?.participant){
+        const results=await Promise.allSettled([requestJson("/api/favorites"),requestJson("/api/progress")]);
+        if(!active)return;
+        if(results[0].status==="fulfilled")setFavorites(results[0].value.favorites||[]);else notify("Não foi possível carregar seus favoritos.");
+        if(results[1].status==="fulfilled")setLocations(results[1].value.locations||{});else notify("Não foi possível carregar seu progresso.");
+      }
+      const params=new URLSearchParams(window.location.search);const target=params.get("view") as View;
+      const book=rows.find(b=>b.id===params.get("book"));
+      if(book){setSelected(book);if(target==="reader")await startReading(book);else setView("detail");}
+      else if(["catalog","library","profile","admin"].includes(target))setView(target);
+      if(params.get("search"))setQuery(params.get("search")!);
+    };
+    restore();
+    try{const stored=JSON.parse(localStorage.getItem(`sambu:reader:${user?.email||"guest"}`)||"{}");if(["light","sepia","dark"].includes(stored.theme))setTheme(stored.theme);if(stored.font>=16&&stored.font<=32)setFont(stored.font);}catch{}
+    const pop=async()=>{const p=new URLSearchParams(window.location.search);const next=p.get("view") as View;const book=booksRef.current.find(b=>b.id===p.get("book"));if(book&&(next==="detail"||next==="reader")){setSelected(book);if(next==="reader"){try{if(!book.format?.toUpperCase().includes("PDF")){const d=await requestJson(`/api/catalog/content?id=${encodeURIComponent(book.id)}`);setSections(d.chapters||[]);}setView("reader");}catch(e){notify((e as Error).message);setView("detail");}}else setView("detail");}else setView(["home","catalog","library","profile","admin"].includes(next)?next:"home");};
+    window.addEventListener("popstate",pop);return()=>{active=false;window.removeEventListener("popstate",pop);};
+  // Initialization runs once per authenticated identity.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[user?.email]);
+  function preference(nextTheme:string,nextFont:number){setTheme(nextTheme);setFont(nextFont);try{localStorage.setItem(`sambu:reader:${user?.email||"guest"}`,JSON.stringify({theme:nextTheme,font:nextFont}));}catch{notify("Não foi possível guardar a preferência neste aparelho.");}}
+  async function favorite(id:string){
+    if(!user?.participant){navigate("profile");notify(user?messages.invitation_required:messages.sign_in_required);return;}
+    if(favoriteBusy)return;setFavoriteBusy(true);
+    try{const value=!favorites.includes(id);await requestJson("/api/favorites",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({bookId:id,favorite:value})});setFavorites(v=>value?[...v,id]:v.filter(x=>x!==id));notify(value?"Livro salvo na biblioteca.":"Livro removido dos favoritos.");}catch(e){notify((e as Error).message);}finally{setFavoriteBusy(false);}
+  }
+  const save = useCallback(async(bookId:string,location:Location)=>{
+    await requestJson("/api/progress",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({bookId,...location})});
+    setLocations(current=>({...current,[bookId]:location}));
+  },[]);
+  const filtered=useMemo(()=>books.filter(b=>(genre==="Todos"||b.genre===genre)&&`${b.title} ${b.author} ${b.genre}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a,b)=>sort==="title"?a.title.localeCompare(b.title,"pt-BR"):(b.publishedAt||"").localeCompare(a.publishedAt||"")),[books,query,genre,sort]);
+  const cards=(list:Book[])=><div className="book-grid">{list.map(book=><BookCard key={book.id} book={book} saved={favorites.includes(book.id)} onOpen={()=>navigate("detail",book)} onFavorite={()=>favorite(book.id)}/>)}</div>;
+  return <div className="app-shell beta-app">
+    {view!=="reader"&&<header><button className="brand" onClick={()=>navigate("home")} aria-label="Início Sambu"><img src="/sambu-logo.png" alt="Sambu"/></button><nav aria-label="Navegação principal">{NAV.map(item=><button key={item.id} className={view===item.id?"active":""} onClick={()=>navigate(item.id)}>{item.label}</button>)}{user?.admin&&<button onClick={()=>navigate("admin")}>Administração</button>}</nav><button className="outline" onClick={()=>navigate("profile")}>{user?"Minha conta":"Entrar"}</button></header>}
+    {view!=="reader"&&<div className="beta-banner">Beta fechado · leitura gratuita para participantes convidados</div>}
+    {view!=="reader"&&<nav className="beta-mobile-nav" aria-label="Navegação móvel">{NAV.map(x=><button key={x.id} onClick={()=>navigate(x.id)}>{x.label}</button>)}{user?.admin&&<button onClick={()=>navigate("admin")}>Admin</button>}</nav>}
+    {(view==="home"||view==="catalog")&&<main className="page"><div className="page-title"><p className="eyebrow">SAMBU EBOOKS</p><h1>{view==="home"?"Sua próxima leitura":"Explore o acervo"}</h1><p>Escolha uma história e leia no seu ritmo.</p></div>
+      <div className="search-box"><input aria-label="Buscar livros" placeholder="Busque por título, autor ou gênero" value={query} onChange={e=>setQuery(e.target.value)}/><button onClick={()=>{setQuery("");setGenre("Todos");}}>Limpar</button></div>
+      <div className="filter-row"><label>Gênero <select value={genre} onChange={e=>setGenre(e.target.value)}><option>Todos</option>{Array.from(new Set(books.map(b=>b.genre))).sort().map(g=><option key={g}>{g}</option>)}</select></label><label>Ordenar <select value={sort} onChange={e=>setSort(e.target.value)}><option value="recent">Mais recentes</option><option value="title">Título A–Z</option></select></label></div>
+      {loading?<p role="status">Carregando acervo…</p>:error?<div role="alert"><p>{error}</p><button className="outline" onClick={load}>Tentar novamente</button></div>:<><p>{filtered.length} {filtered.length===1?"livro encontrado":"livros encontrados"}</p>{filtered.length?cards(filtered):<div className="library-empty"><h2>{books.length?"Nenhum resultado":"O acervo está sendo preparado"}</h2><p>{books.length?"Tente outro título ou gênero.":"As obras aprovadas aparecerão aqui."}</p></div>}</>}
+    </main>}
+    {view==="library"&&<main className="page"><h1>Minha biblioteca</h1>{!user?.participant?<AccessNotice user={user}/>:<><h2>Continue sua leitura</h2>{books.filter(b=>locations[b.id]?.progress>0&&locations[b.id]?.progress<100).length?books.filter(b=>locations[b.id]?.progress>0&&locations[b.id]?.progress<100).map(b=><article className="beta-continue" key={b.id}><div><h3>{b.title}</h3><p>{locations[b.id].progress}% lido</p></div><button className="primary" disabled={readingBusy} onClick={()=>startReading(b)}>Continuar leitura</button></article>):<p>Você ainda não tem leituras em andamento.</p>}<h2>Favoritos</h2>{favorites.length?cards(books.filter(b=>favorites.includes(b.id))):<p>Toque no coração de um livro para guardá-lo aqui.</p>}<h2>Concluídos</h2>{cards(books.filter(b=>locations[b.id]?.progress===100))}</>}</main>}
+    {view==="detail"&&selected&&<main className="detail"><button className="back" onClick={()=>navigate("catalog")}>← Voltar ao acervo</button><section><Cover book={selected}/><div className="book-info"><p>{selected.genre}</p><h1>{selected.title}</h1><p>por {selected.author}</p><p className="blurb">{selected.description}</p><p>{selected.format||"Ebook"} · Disponível no beta por convite</p><div className="actions"><button className="primary" disabled={readingBusy} onClick={()=>startReading(selected)}>{readingBusy?"Abrindo…":locations[selected.id]?.progress&&locations[selected.id].progress<100?"Continuar leitura":"Ler agora"}</button><button className="outline" disabled={favoriteBusy} onClick={()=>favorite(selected.id)}>{favorites.includes(selected.id)?"♥ Salvo":"♡ Salvar"}</button></div></div></section></main>}
+    {view==="reader"&&selected&&<Reader key={selected.id} book={selected} sections={sections} initial={locations[selected.id]||{position:0,progress:0}} theme={theme} font={font} preference={preference} onSave={save} onBack={()=>navigate("detail",selected)}/>}
+    {view==="profile"&&<Profile user={user} notify={notify}/>}
+    {view==="admin"&&<main className="page">{user?.admin?<Admin owner={user.email} notify={notify} onChange={load}/>:<AccessNotice user={user} admin/>}</main>}
+    {toast&&<div className="toast" role="status">{toast}</div>}
+  </div>;
+}
+function AccessNotice({user,admin=false}:{user:User;admin?:boolean}) {
+  return <section className="library-empty"><h2>{!user?"Entre para continuar":admin?"Acesso administrativo restrito":"Acesso por convite"}</h2><p>{!user?"Use a conta informada no convite do beta.":admin?"Sua conta não possui permissão para administrar o acervo.":"Solicite à equipe Sambu a inclusão do seu email entre os participantes."}</p>{!user&&<a className="primary" href="/signin-with-chatgpt?return_to=%2F%3Fview%3Dprofile">Entrar com ChatGPT</a>}</section>;
+}
+function Profile({user,notify}:{user:User;notify:(s:string)=>void}) {
+  const [name,setName]=useState(user?.name||""),[busy,setBusy]=useState(false);
+  useEffect(()=>{if(user)requestJson("/api/profile").then(d=>setName(d.profile?.displayName||user.name)).catch(e=>notify(e.message));},[user,notify]);
+  if(!user)return <main className="page"><AccessNotice user={user}/></main>;
+  return <main className="page"><h1>Minha conta</h1><p>{user.email}</p><p>{user.admin?"Administrador":user.participant?"Participante do beta":"Conta identificada · convite pendente"}</p><form className="beta-form" onSubmit={async e=>{e.preventDefault();setBusy(true);try{await requestJson("/api/profile",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({displayName:name})});notify("Nome salvo com sucesso.");}catch(e){notify((e as Error).message);}finally{setBusy(false);}}}><label>Nome de exibição<input value={name} required maxLength={80} onChange={e=>setName(e.target.value)}/></label><button className="primary" disabled={busy}>{busy?"Salvando…":"Salvar nome"}</button></form><p>O beta é gratuito. Nenhuma assinatura ou cobrança é iniciada aqui.</p><a href="/signout-with-chatgpt?return_to=%2F">Sair da conta</a></main>;
+}
+function Reader({book,sections,initial,theme,font,preference,onSave,onBack}:{book:Book;sections:Section[];initial:Location;theme:string;font:number;preference:(t:string,f:number)=>void;onSave:(id:string,l:Location)=>Promise<void>;onBack:()=>void}) {
+  const paragraphs=useMemo(()=>sections.flatMap(s=>s.body),[sections]);
+  const [state,setState]=useState(""),[pdfPage,setPdfPage]=useState(Math.max(1,initial.position));
+  const [current,setCurrent]=useState(initial);const currentRef=useRef(initial);const initialRef=useRef(initial);const ready=useRef(false);const timer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const queue=useRef<Promise<void>>(Promise.resolve());
+  const pdf=book.format?.toUpperCase().includes("PDF");
+  const persist=useCallback(async(location:Location)=>{setState("Salvando posição…");try{const job=queue.current.catch(()=>{}).then(()=>onSave(book.id,location));queue.current=job;await job;setState("Posição salva");}catch{setState("Falha ao salvar. Use “Salvar posição” para tentar novamente.");}},[book.id,onSave]);
+  useEffect(()=>{
+    if(pdf)return;
+    const frame=requestAnimationFrame(()=>{document.getElementById(`paragraph-${Math.min(initialRef.current.position,Math.max(0,paragraphs.length-1))}`)?.scrollIntoView();ready.current=true;});
+    const scroll=()=>{if(!ready.current)return;const elements=Array.from(document.querySelectorAll<HTMLElement>('[data-reader-position]'));let position=0;for(const element of elements){if(element.getBoundingClientRect().top<=140)position=Number(element.dataset.readerPosition);else break;}const location={position,progress:initialRef.current.progress===100?100:Math.min(99,Math.max(1,Math.round(position/Math.max(1,paragraphs.length)*100)))};currentRef.current=location;setCurrent(location);if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>persist(location),900);};
+    window.addEventListener("scroll",scroll,{passive:true});return()=>{cancelAnimationFrame(frame);window.removeEventListener("scroll",scroll);if(timer.current)clearTimeout(timer.current);};
+  },[pdf,paragraphs.length,persist]);
+  return <main className={`reader ${theme}`}><div className="reader-top"><button onClick={async()=>{if(timer.current)clearTimeout(timer.current);await persist(currentRef.current);onBack();}}>← Voltar</button><b>{book.title}</b><div className="reader-controls">{!pdf&&<><button aria-label="Diminuir fonte" onClick={()=>preference(theme,Math.max(16,font-2))}>A−</button><button aria-label="Aumentar fonte" onClick={()=>preference(theme,Math.min(32,font+2))}>A+</button><select aria-label="Tema do leitor" value={theme} onChange={e=>preference(e.target.value,font)}><option value="light">Claro</option><option value="sepia">Sépia</option><option value="dark">Escuro</option></select></>}</div></div>
+    {pdf?<section className="pdf-reader"><p>Para retomar um PDF, informe e salve a página exibida no visualizador.</p><label>Página <input type="number" min={1} max={100000} value={pdfPage} onChange={e=>{const position=Math.max(1,Math.min(100000,Number(e.target.value)||1));setPdfPage(position);currentRef.current={position,progress:1};}}/></label><button className="outline" onClick={()=>persist(currentRef.current)}>Salvar posição</button><iframe title={`Leitura de ${book.title}`} src={`/api/catalog/file?id=${encodeURIComponent(book.id)}#page=${pdfPage}`}/></section>:<article style={{fontSize:font}}>{paragraphs.map((p,i)=><p data-reader-position={i} id={`paragraph-${i}`} key={i}>{p}</p>)}<div className="reader-end"><button className="outline" onClick={()=>persist(currentRef.current)}>Salvar posição</button><button className="primary" onClick={async()=>{if(timer.current)clearTimeout(timer.current);const end={position:Math.max(0,paragraphs.length-1),progress:100};currentRef.current=end;await persist(end);}}>Concluir leitura</button></div></article>}
+    <div className="beta-reader-status" role="status">{state||`${current.progress}% lido`}</div></main>;
+}
+function Admin({owner,notify,onChange}:{owner:string;notify:(s:string)=>void;onChange:()=>Promise<unknown>}) {
+  const [tab,setTab]=useState("catalog"),[rows,setRows]=useState<Book[]>([]),[error,setError]=useState(""),[busy,setBusy]=useState(false),[editing,setEditing]=useState<Book|null>(null);
+  const reload=useCallback(async()=>{setError("");try{const data=await requestJson("/api/admin/books");setRows(data.books||[]);await onChange();}catch(e){setError((e as Error).message);}},[onChange]);
+  useEffect(()=>{reload();},[reload]);
+  return <><div className="page-title"><h1>Administração do acervo</h1><p>{rows.filter(b=>b.status==="published").length} obras publicadas · {rows.filter(b=>b.status!=="published").length} fora do catálogo</p></div><div className="tabs"><button onClick={()=>{setTab("catalog");reload();}}>Acervo</button><button onClick={()=>setTab("imports")}>Importar e revisar</button></div>{error&&<div role="alert"><p>{error}</p><button onClick={reload}>Tentar novamente</button></div>}
+    {tab==="imports"?<ImportCenter owner={owner} notify={message=>{notify(message);reload();}}/>:<>{!rows.length&&!error&&<p>Importe e revise o primeiro ebook para iniciar o acervo.</p>}<div className="admin-table-wrap"><table><thead><tr><th>Livro</th><th>Autor</th><th>Situação</th><th>Ação</th></tr></thead><tbody>{rows.map(b=><tr key={b.id}><td>{b.title}</td><td>{b.author}</td><td>{b.status==="published"?"Publicado":"Fora do catálogo"}</td><td><button className="outline" onClick={()=>setEditing(b)}>Editar</button></td></tr>)}</tbody></table></div></>}
+    {editing&&<div className="modal-backdrop"><section className="book-modal" role="dialog" aria-modal="true" aria-labelledby="edit-title"><h2 id="edit-title">Editar obra</h2><form className="beta-form" onSubmit={async e=>{e.preventDefault();const mediaForm=new FormData(e.currentTarget);setBusy(true);try{await requestJson("/api/admin/books",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(editing)});for(const kind of ["cover","epub"]){const file=mediaForm.get(kind);if(file instanceof File&&file.size){const media=new FormData();media.set("file",file);media.set("kind",kind);media.set("bookId",editing.id);await requestJson("/api/media",{method:"POST",body:media});}}await reload();setEditing(null);notify("Obra atualizada.");}catch(e){notify((e as Error).message);}finally{setBusy(false);}}}><label>Título<input value={editing.title} required onChange={e=>setEditing({...editing,title:e.target.value})}/></label><label>Autor<input value={editing.author} required onChange={e=>setEditing({...editing,author:e.target.value})}/></label><label>Gênero<input value={editing.genre} required onChange={e=>setEditing({...editing,genre:e.target.value})}/></label><label>Sinopse<textarea value={editing.description} required onChange={e=>setEditing({...editing,description:e.target.value})}/></label><label>Substituir capa (opcional)<input type="file" name="cover" accept="image/jpeg,image/png,image/webp"/></label><label>Substituir ebook (opcional, até 32 MB)<input type="file" name="epub" accept="application/epub+zip,application/pdf"/></label><label>Visibilidade<select value={editing.status} onChange={e=>setEditing({...editing,status:e.target.value})}><option value="published">Publicado</option><option value="draft">Despublicado</option><option value="archived">Arquivado</option></select></label><div><button type="button" className="outline" onClick={()=>setEditing(null)}>Cancelar</button><button disabled={busy} className="primary">{busy?"Salvando…":"Salvar alterações"}</button></div></form></section></div>}
+  </>;
+}
+
+type ImportBatch = {
+  id: string;
+  name: string;
+  source: string;
+  status: string;
+  totalItems: number;
+  validItems: number;
+  errorItems: number;
+  expiresAt: string | null;
+};
+type StagedBook = {
+  id: string;
+  title: string;
+  author: string;
+  genre: string | null;
+  language: string;
+  description: string | null;
+  source: string | null;
+  licenseType: string | null;
+  fileName: string | null;
+  contentType: string | null;
+  fileSize: number | null;
+  coverKey: string | null;
+  rightsConfirmed: boolean;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  correctionNote: string | null;
+  publishedBookId: string | null;
+  status: string;
+};
+
+function ImportCenter({ notify, owner }: { notify: (message: string) => void; owner: string }) {
+  const [batches, setBatches] = useState<ImportBatch[]>([]);
+  const [items, setItems] = useState<StagedBook[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<"individual" | "batch">("individual");
+  const [folderPath, setFolderPath] = useState("");
+  const [selected, setSelected] = useState<StagedBook | null>(null);
+  const [uploadStage, setUploadStage] = useState("");
+
+  async function load() {
+    const response = await fetch("/api/admin/imports");
+    if (!response.ok) throw new Error("Não foi possível carregar as importações.");
+    const data = await response.json() as ApiPayload;
+    setBatches(data.batches || []);
+    setItems(data.items || []);
+  }
+  useEffect(() => {
+    load().catch(error => notify(error.message));
+  }, []);
+
+  async function uploadIndividual(file: File) {
+    const limit = file.name.toLowerCase().endsWith(".epub") ? 32_000_000 : 250_000_000;
+    if (file.size > limit) throw new Error("Arquivo acima do limite: EPUB 32 MB; PDF 250 MB.");
+    const resumeKey = `sambu:upload:${owner}:${file.name}:${file.size}:${file.lastModified}`;
+    let resumed: { uploadId:string; chunkSize:number; nextPart:number } | null = null;
+    try { const candidate=JSON.parse(localStorage.getItem(resumeKey)||"null"); if(candidate && /^[a-f0-9-]{36}$/i.test(candidate.uploadId) && candidate.chunkSize===250000 && Number.isInteger(candidate.nextPart) && candidate.nextPart>=0 && candidate.nextPart<=Math.ceil(file.size/candidate.chunkSize)) resumed=candidate; } catch {}
+    let initialized: ApiPayload;
+    if (resumed) initialized = { ...resumed, batch: { validItems:0,errorItems:0 } };
+    else {
+      const initResponse = await fetch("/api/admin/uploads?v=3", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"init",fileName:file.name,contentType:file.type,size:file.size})});
+      initialized = await initResponse.json().catch(()=>({})) as ApiPayload;
+      if (!initResponse.ok) throw new Error(initialized.error || `init_${initResponse.status}`);
+    }
+
+    function base64(buffer: ArrayBuffer) {
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let start = 0; start < bytes.length; start += 0x8000)
+        binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000));
+      return btoa(binary);
+    }
+
+    const chunkSize = Number(initialized.chunkSize);
+    const totalParts = Math.ceil(file.size / chunkSize);
+    for (let part = resumed?.nextPart || 0; part < totalParts; part++) {
+      setUploadStage(`Enviando ebook… ${Math.round(part / totalParts * 100)}%`);
+      const chunk = file.slice(part * chunkSize, (part + 1) * chunkSize);
+      let response: Response | undefined;
+      for (let attempt = 0; attempt < 3; attempt++) {
+      try { response = await fetch("/api/admin/uploads?v=3", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "part",
+          uploadId: initialized.uploadId,
+          part,
+          data: base64(await chunk.arrayBuffer()),
+        }),
+      });
+      if (response.ok || response.status < 500) break;
+      } catch { if (attempt === 2) throw new Error("network_error"); }
+      await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)));
+      }
+      if (!response) throw new Error("network_error");
+      const detail = await response.json().catch(() => ({})) as ApiPayload;
+      if (!response.ok)
+        throw new Error(detail.error || `part_${part + 1}_${response.status}`);
+      try { localStorage.setItem(resumeKey,JSON.stringify({uploadId:initialized.uploadId,chunkSize,nextPart:part+1})); } catch {}
+    }
+
+    setUploadStage("Finalizando o ebook…");
+    const completeResponse = await fetch("/api/admin/uploads?v=3", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "complete",
+        uploadId: initialized.uploadId,
+        fileName: file.name,
+        contentType: file.type,
+        size: file.size,
+        totalParts,
+      }),
+    });
+    const completed = await completeResponse.json().catch(() => ({})) as ApiPayload;
+    if (!completeResponse.ok)
+      throw new Error(completed.error || `complete_${completeResponse.status}`);
+    try { localStorage.removeItem(resumeKey); } catch {}
+    return completed;
+  }
+
+  async function importBatch(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    const form = event.currentTarget;
+    setUploadStage(mode === "individual" ? "Preparando o ebook…" : "Processando lote…");
+    try {
+      const requestForm = new FormData(form);
+      if (mode === "individual") {
+        const file = requestForm.get("singleFile");
+        if (!(file instanceof File) || !file.size)
+          throw new Error("book_file_required");
+        const uploaded = await uploadIndividual(file);
+        requestForm.delete("singleFile");
+        requestForm.set("uploadedFiles", JSON.stringify([uploaded]));
+      }
+      setUploadStage("Registrando na fila de revisão…");
+      const response = await fetch("/api/admin/imports?v=3", {
+        method: "POST",
+        body: requestForm,
+      });
+      const data = await response.json().catch(() => ({})) as ApiPayload;
+      if (!response.ok)
+        throw new Error(data.error || `import_${response.status}`);
+      notify(
+        mode === "individual"
+          ? `Livro recebido: ${data.batch.validItems} válido e ${data.batch.errorItems} para revisar.`
+          : `Lote recebido: ${data.batch.validItems} válidos e ${data.batch.errorItems} para revisar.`,
+      );
+      form.reset();
+      setFolderPath("");
+      await load();
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "unknown_error";
+      notify(
+        code === "sign_in_required"
+          ? "Sua sessão expirou. Entre novamente para importar."
+          : code === "book_file_required"
+            ? "Selecione o arquivo EPUB antes de importar."
+            : `Falha na importação (${code}).`,
+      );
+    } finally {
+      setUploadStage("");
+      setBusy(false);
+    }
+  }
+
+  async function reviewBook(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const submitter = (event.nativeEvent as SubmitEvent)
+      .submitter as HTMLButtonElement | null;
+    const action = submitter?.value || "draft";
+    const form = new FormData(event.currentTarget);
+    form.set("id", selected.id);
+    form.set("action", action);
+    form.set(
+      "rightsConfirmed",
+      form.get("rightsConfirmed") === "on" ? "true" : "false",
+    );
+    setBusy(true);
+    try {
+    const response = await fetch("/api/admin/imports", {
+      method: "PATCH",
+      body: form,
+    });
+    const data = await response.json().catch(() => ({})) as ApiPayload;
+    if (response.ok) {
+      notify(
+        action === "publish"
+          ? "Livro publicado com sucesso. Ele já está disponível no acervo."
+          : action === "correction"
+            ? "Correção solicitada e registrada."
+            : "Revisão salva como rascunho.",
+      );
+      setSelected(null);
+      await load();
+    } else {
+      notify(
+        data.error === "review_incomplete"
+          ? "Preencha os campos obrigatórios e confirme os direitos de publicação."
+          : data.error === "book_file_required"
+            ? "O arquivo do ebook é obrigatório para publicar."
+            : messages[data.error || ""] || "Não foi possível salvar a revisão.",
+      );
+    }
+    } catch(error) { notify((error as Error).message || "Falha de conexão. Tente novamente."); } finally { setBusy(false); }
+  }
+
+  async function deleteBook(item: StagedBook) {
+    if (!window.confirm(`Arquivar a importação de “${item.title}”?`)) return;
+    setBusy(true);
+    try {
+    const response = await fetch(
+      `/api/admin/imports?id=${encodeURIComponent(item.id)}`,
+      { method: "DELETE" },
+    );
+    if (response.ok) {
+      notify("Importação arquivada. Os arquivos foram preservados.");
+      setSelected(null);
+      await load();
+    } else notify("Não foi possível excluir esta importação.");
+    } catch(error) { notify((error as Error).message || "Falha de conexão. Tente novamente."); } finally { setBusy(false); }
+  }
+
+  return (
+    <section className="import-center">
+      <div className="import-hero">
+        <div>
+          <p className="eyebrow coral">SAMBU CONTENT HUB</p>
+          <h2>Importe livros no seu ritmo</h2>
+          <p>
+            Cadastre um livro com seus dados completos ou escolha uma pasta para
+            enviar um acervo inteiro. Tudo entra primeiro em validação.
+          </p>
+        </div>
+        <div className="test-database">
+          <span>REVISÃO DE CONTEÚDO</span>
+          <b>Fila de revisão</b>
+          <p>Os arquivos aguardam revisão e não aparecem no catálogo antes da publicação.</p>
+          <div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        className="import-mode-tabs"
+        role="tablist"
+        aria-label="Modo de importação"
+      >
+        <button
+          className={mode === "individual" ? "active" : ""}
+          onClick={() => setMode("individual")}
+        >
+          <span>01</span>
+          <b>Livro individual</b>
+          <small>Um título por vez</small>
+        </button>
+        <button
+          className={mode === "batch" ? "active" : ""}
+          onClick={() => setMode("batch")}
+        >
+          <span>02</span>
+          <b>Importação em lote</b>
+          <small>Selecione uma pasta</small>
+        </button>
+      </div>
+
+      <div className="import-layout">
+        <form className="batch-form" onSubmit={importBatch} key={mode}>
+          <input type="hidden" name="mode" value={mode} />
+          <div className="card-head">
+            <div>
+              <h3>
+                {mode === "individual"
+                  ? "Importar livro ou ebook"
+                  : "Importar pasta de livros"}
+              </h3>
+              <small>
+                {mode === "individual"
+                  ? "EPUB ou PDF"
+                  : "Pasta com CSV/JSON + arquivos"}
+              </small>
+            </div>
+            <span className="step-badge">
+              {mode === "individual" ? "1×" : "N×"}
+            </span>
+          </div>
+          <label>
+            <span>Origem da obra</span>
+            <select name="source">
+              <option>Sambu Ebooks</option>
+                  <option>Portal Domínio Público</option>
+              <option>Standard Ebooks</option>
+              <option>Project Gutenberg</option>
+              <option>Biblioteca Nacional</option>
+              <option>Wikisource</option>
+              <option>Autores parceiros</option>
+            </select>
+          </label>
+          {mode === "individual" ? (
+            <>
+              <div className="individual-fields">
+                <label>
+                  <span>Título *</span>
+                  <input name="title" required placeholder="Título da obra" />
+                </label>
+                <label>
+                  <span>Autor *</span>
+                  <input name="author" required placeholder="Nome do autor" />
+                </label>
+                <label>
+                  <span>Gênero</span>
+                  <input name="genre" placeholder="Romance, suspense…" />
+                </label>
+                <label>
+                  <span>Idioma</span>
+                  <select name="language">
+                    <option value="pt-BR">Português (Brasil)</option>
+                    <option value="en">Inglês</option>
+                    <option value="es">Espanhol</option>
+                  </select>
+                </label>
+                <label>
+                  <span>ISBN</span>
+                  <input name="isbn" placeholder="Opcional" />
+                </label>
+                <label>
+                  <span>Licença *</span>
+                  <select name="licenseType" required>
+                    <option value="">Selecione</option>
+                    <option>Domínio público</option>
+                    <option>Autorização do autor</option>
+                    <option>Contrato editorial</option>
+                    <option>Creative Commons</option>
+                    <option>Revisão jurídica pendente</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                <span>Sinopse</span>
+                <textarea
+                  name="description"
+                  rows={4}
+                  placeholder="Resumo da obra"
+                />
+              </label>
+              <label className="drop-field featured-drop">
+                <b>Selecione o livro ou ebook *</b>
+                <span>EPUB até 32 MB ou PDF até 250 MB</span>
+                <input
+                  name="singleFile"
+                  type="file"
+                  accept=".epub,.pdf"
+                  required
+                />
+              </label>
+            </>
+          ) : (
+            <>
+              <label>
+                <span>Nome do lote</span>
+                <input
+                  name="name"
+                  required
+                  placeholder="Clássicos brasileiros — lote 01"
+                />
+              </label>
+              <label className="drop-field folder-field">
+                <b>Escolher pasta do acervo</b>
+                <span>
+                  Inclua a planilha CSV/JSON e até 50 arquivos EPUB ou PDF
+                </span>
+                <input
+                  name="folderFiles"
+                  type="file"
+                  multiple
+                  ref={(input) => {
+                    if (input) input.setAttribute("webkitdirectory", "");
+                  }}
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0] as
+                      | (File & { webkitRelativePath?: string })
+                      | undefined;
+                    setFolderPath(
+                      file?.webkitRelativePath?.split("/")[0] ||
+                        file?.name ||
+                        "",
+                    );
+                  }}
+                />
+              </label>
+              <div className={`folder-path ${folderPath ? "selected" : ""}`}>
+                <span>⌂ Caminho da pasta</span>
+                <b>
+                  {folderPath ? `/${folderPath}/` : "Nenhuma pasta selecionada"}
+                </b>
+                <small>
+                  Por segurança, o navegador mostra apenas o caminho relativo.
+                </small>
+              </div>
+              <details className="alternate-upload">
+                <summary>Ou selecionar os arquivos separadamente</summary>
+                <label className="drop-field">
+                  <b>Planilha de metadados</b>
+                  <input
+                    name="manifest"
+                    type="file"
+                    accept=".csv,.json,text/csv,application/json"
+                  />
+                </label>
+                <label className="drop-field">
+                  <b>Arquivos dos livros</b>
+                  <input
+                    name="files"
+                    type="file"
+                    accept=".epub,.pdf"
+                    multiple
+                  />
+                </label>
+              </details>
+              <div className="manifest-help">
+                <b>Colunas aceitas</b>
+                <code>
+                  title, author, genre, language, description, isbn, source,
+                  sourceUrl, licenseType, fileName
+                </code>
+              </div>
+            </>
+          )}
+          <button className="primary import-submit" disabled={busy}>
+            {busy
+              ? uploadStage || "Processando…"
+              : mode === "individual"
+                ? "Validar e importar livro"
+                : "Validar e importar pasta"}
+          </button>
+        </form>
+
+        <div className="import-summary">
+          <div className="card-head">
+            <div>
+              <h3>Status das importações</h3>
+              <small>{batches.length} importações recentes</small>
+            </div>
+            <span className="step-badge">02</span>
+          </div>
+          {batches.length === 0 ? (
+            <div className="empty-import">
+              <span>⇧</span>
+              <b>Nenhuma importação registrada</b>
+              <p>
+                Envie um livro, selecione uma pasta ou gere a base
+                demonstrativa.
+              </p>
+            </div>
+          ) : (
+            <div className="batch-list">
+              {batches.map((batch) => (
+                <article key={batch.id}>
+                  <div>
+                    <div className="batch-title">
+                      <b>{batch.name}</b>
+                      <span className={`batch-status ${batch.status}`}>
+                        {batch.status === "ready"
+                          ? "Importação concluída"
+                          : batch.status === "needs_review"
+                            ? "Revisar pendências"
+                            : "Processando"}
+                      </span>
+                    </div>
+                    <small>{batch.source}</small>
+                  </div>
+                  <div className="batch-numbers">
+                    <span>{batch.totalItems} itens</span>
+                    <em>{batch.validItems} válidos</em>
+                    {batch.errorItems > 0 && <i>{batch.errorItems} revisar</i>}
+                  </div>
+                  <div className="batch-progress">
+                    <i
+                      style={{
+                        width: `${batch.totalItems ? (batch.validItems / batch.totalItems) * 100 : 0}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="batch-footer">
+                    <small>
+                      {batch.status === "ready"
+                        ? "Arquivo recebido e pronto para revisão editorial."
+                        : batch.status === "needs_review"
+                          ? "Importação finalizada, mas alguns dados precisam de correção."
+                          : "Validando arquivo e metadados…"}
+                    </small>
+                    {batch.status !== "processing" && (
+                      <button
+                        type="button"
+                        className="outline compact"
+                        onClick={() =>
+                          document
+                            .getElementById("staged-books")
+                            ?.scrollIntoView({ behavior: "smooth" })
+                        }
+                      >
+                        {batch.status === "ready"
+                          ? "Revisar ebook"
+                          : "Ver pendências"}
+                      </button>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <section id="staged-books" className="admin-card staged-books">
+        <div className="card-head">
+          <div>
+            <h3>Livros no banco temporário</h3>
+            <small>Revisão de licença obrigatória antes da publicação</small>
+          </div>
+          <span>{items.length} registros</span>
+        </div>
+        <div className="admin-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Livro</th>
+                <th>Fonte</th>
+                <th>Licença</th>
+                <th>Validação</th>
+                <th>Ação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    <b>{item.title}</b>
+                    <small>
+                      {item.author} · {item.genre || "Sem gênero"}
+                    </small>
+                  </td>
+                  <td>{item.source || "Não informada"}</td>
+                  <td>{item.licenseType || "Pendente"}</td>
+                  <td>
+                    <span className={`import-status ${item.status}`}>
+                      {item.status === "published"
+                        ? "Publicado"
+                        : item.status === "draft"
+                          ? "Rascunho"
+                          : item.status === "correction_requested"
+                            ? "Correção solicitada"
+                            : item.status === "ready"
+                              ? "Pronto para revisar"
+                              : "Atenção necessária"}
+                    </span>
+                  </td>
+                  <td>
+                    {item.status === "published" ? (
+                      <button
+                        className="outline table-action"
+                        onClick={() =>
+                          window.location.assign(
+                            `/?view=catalog&search=${encodeURIComponent(item.title)}`,
+                          )
+                        }
+                      >
+                        Ver no acervo
+                      </button>
+                    ) : (
+                      <button
+                        className="primary table-action"
+                        onClick={() => setSelected(item)}
+                      >
+                        Revisar ebook
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {selected && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <form className="review-modal" onSubmit={reviewBook}>
+            <div className="modal-head">
+              <div>
+                <p className="eyebrow coral">REVISÃO EDITORIAL</p>
+                <h2>{selected.title}</h2>
+                <small>
+                  Confira o arquivo, os metadados e os direitos antes de
+                  publicar.
+                </small>
+              </div>
+              <button type="button" onClick={() => setSelected(null)}>
+                ×
+              </button>
+            </div>
+
+            <div className="review-layout">
+              <div className="review-fields">
+                <label>
+                  <span>Título *</span>
+                  <input name="title" defaultValue={selected.title} required />
+                </label>
+                <label>
+                  <span>Autor *</span>
+                  <input
+                    name="author"
+                    defaultValue={selected.author}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Gênero *</span>
+                  <input
+                    name="genre"
+                    defaultValue={selected.genre || ""}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Idioma *</span>
+                  <select name="language" defaultValue={selected.language}>
+                    <option value="pt-BR">Português (Brasil)</option>
+                    <option value="en">Inglês</option>
+                    <option value="es">Espanhol</option>
+                  </select>
+                </label>
+                <label className="wide">
+                  <span>Descrição *</span>
+                  <textarea
+                    name="description"
+                    rows={5}
+                    defaultValue={selected.description || ""}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Licença *</span>
+                  <input
+                    name="licenseType"
+                    defaultValue={selected.licenseType || ""}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Capa</span>
+                  <input name="cover" type="file" accept="image/jpeg,image/png,image/webp" />
+                </label>
+                <label className="wide">
+                  <span>Observação para correção</span>
+                  <textarea
+                    name="correctionNote"
+                    rows={2}
+                    defaultValue={selected.correctionNote || ""}
+                    placeholder="Descreva o que precisa ser ajustado"
+                  />
+                </label>
+              </div>
+
+              <aside className="file-review">
+                <div className="cover-check">
+                  <span>{selected.coverKey ? "✓" : "+"}</span>
+                  <b>{selected.coverKey ? "Capa recebida" : "Capa pendente"}</b>
+                  <small>Envie uma imagem no formulário, se necessário.</small>
+                </div>
+                <div className="file-check">
+                  <p className="eyebrow">ARQUIVO DO LIVRO</p>
+                  <b>{selected.fileName || "Arquivo não localizado"}</b>
+                  <small>
+                    {selected.fileSize
+                      ? `${(selected.fileSize / 1024 / 1024).toFixed(1)} MB`
+                      : "Tamanho não informado"}
+                  </small>
+                  {selected.fileName && (
+                    <a
+                      className="outline preview-link"
+                      href={`/api/admin/imports?file=${encodeURIComponent(selected.id)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Abrir prévia do EPUB/PDF
+                    </a>
+                  )}
+                </div>
+                <label className="rights-check">
+                  <input
+                    type="checkbox"
+                    name="rightsConfirmed"
+                    defaultChecked={selected.rightsConfirmed}
+                  />
+                  <span>
+                    <b>Direitos de publicação conferidos</b>
+                    <small>
+                      Confirmo que o Sambu possui autorização ou licença válida
+                      para disponibilizar esta obra.
+                    </small>
+                  </span>
+                </label>
+                {selected.reviewedAt && (
+                  <p className="review-audit">
+                    Última revisão por <b>{selected.reviewedBy}</b> em{" "}
+                    {new Date(selected.reviewedAt).toLocaleString("pt-BR")}
+                  </p>
+                )}
+              </aside>
+            </div>
+
+            <div className="review-actions">
+              <button
+                type="button"
+                className="danger-link"
+                onClick={() => deleteBook(selected)}
+                disabled={busy}
+              >
+                Arquivar importação
+              </button>
+              <div>
+                <button
+                  type="submit"
+                  name="action"
+                  value="correction"
+                  formNoValidate
+                  className="outline"
+                  disabled={busy}
+                >
+                  Solicitar correção
+                </button>
+                <button
+                  type="submit"
+                  name="action"
+                  value="draft"
+                  formNoValidate
+                  className="outline"
+                  disabled={busy}
+                >
+                  Salvar rascunho
+                </button>
+                <button
+                  type="submit"
+                  name="action"
+                  value="publish"
+                  className="primary"
+                  disabled={busy}
+                >
+                  Aprovar e publicar
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}
+

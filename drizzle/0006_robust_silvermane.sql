@@ -1,0 +1,1 @@
+ALTER TABLE `reading_progress` ADD `position` integer DEFAULT 0 NOT NULL;
