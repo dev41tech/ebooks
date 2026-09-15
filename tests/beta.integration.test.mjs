@@ -178,3 +178,17 @@ test('bulk uploads enter review together without invented authors or automatic p
  const rows=await db.prepare("SELECT * FROM staging_books WHERE file_name IN ('Lote um.epub','Lote dois.epub')").all();assert.equal(rows.results.length,2);
  for(const row of rows.results){assert.equal(row.published_book_id,null);assert.equal(row.rights_confirmed,0);assert.ok(row.storage_key);}
 });
+
+test('ebook deletion requires master and exact title, removes access and preserves source',async()=>{
+ identity.email=admin;await db.prepare('DELETE FROM master_attempts').run();
+ const login=await routes.master.POST(masterRequest('login'));identity.cookie=login.headers.get('set-cookie').split(';')[0];
+ const staged=await stage('imports/direct/delete-test.epub');
+ const result=await (await routes.imports.PATCH(review(staged))).json();const id=result.publishedBookId;
+ identity.email=reader;assert.equal((await routes.books.DELETE(payload({id,confirmTitle:'Livro de teste'},'DELETE'))).status,403);
+ identity.email=admin;assert.equal((await routes.books.DELETE(payload({id,confirmTitle:'errado'},'DELETE'))).status,400);
+ assert.equal((await routes.books.DELETE(payload({id,confirmTitle:'Livro de teste'},'DELETE'))).status,200);
+ assert.ok(!(await (await routes.books.GET()).json()).books.some(book=>book.id===id));
+ assert.ok(!(await (await routes.catalog.GET(new Request('https://sambu.test/api'))).json()).books.some(book=>book.id===id));
+ assert.ok(await env.BUCKET.head('imports/direct/delete-test.epub'));
+ identity.email=reader;assert.notEqual((await routes.content.GET(new Request(`https://sambu.test/api?id=${id}`))).status,200);
+});
