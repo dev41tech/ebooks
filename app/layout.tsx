@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./review.css";
+import "./mobile.css";
 export const metadata: Metadata = {
   metadataBase: new URL("https://sambu-r3-teste.marcosdiascwb.chatgpt.site"),
   title: "Sambu",

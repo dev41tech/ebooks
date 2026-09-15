@@ -1,0 +1,79 @@
+/* Shared application: responsive presentation only, same data and operations. */
+.beta-app {--mobile-nav-height:76px;}
+.beta-app main,.beta-app section,.beta-app .beta-form {min-width:0;}
+.beta-app button,.beta-app a,.beta-app input,.beta-app select {touch-action:manipulation;}
+.beta-app .pdf-reader iframe {width:100%;border:0;}
+.beta-app .admin-table-wrap {max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;}
+@media (max-width:1024px) {
+ .beta-app>header {padding-inline:20px;gap:16px;}
+ .beta-app>header nav {gap:16px;}
+ .beta-app>header nav button {font-size:14px;}
+ .beta-app .review-layout {grid-template-columns:minmax(0,1fr);}
+}
+@media (max-width:760px) {
+ .beta-app {padding-bottom:calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));}
+ .beta-app>header {height:auto;min-height:64px;padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));gap:12px;}
+ .beta-app>header nav {display:none;}
+ .beta-app>header .brand img {width:110px;max-height:38px;object-fit:contain;}
+ .beta-app>header>.outline {padding:10px 14px;font-size:14px;min-height:44px;}
+ .beta-app .beta-mobile-nav {position:fixed;z-index:35;inset:auto 0 0;display:flex;align-items:stretch;justify-content:space-around;flex-wrap:nowrap;gap:3px;height:auto;min-height:var(--mobile-nav-height);padding:8px max(8px,env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));background:#fffaf8f5;backdrop-filter:blur(18px);border-top:1px solid #e4d7e0;box-shadow:0 -6px 24px #2413240c;}
+ .beta-app .beta-mobile-nav button {flex:1;min-width:0;min-height:48px;padding:10px 3px;background:transparent;color:#665166;border:0;border-radius:12px;font-size:12px;font-weight:700;}
+ .beta-app .beta-mobile-nav button[aria-current="page"] {background:#f1deef;color:#8d127b;box-shadow:inset 0 3px #ba0caf;}
+ .beta-app .beta-mobile-nav button:after {display:none;}
+ .beta-app .beta-banner {font-size:12px;line-height:1.5;padding:9px 16px;}
+ .beta-app .page,.beta-app .detail {width:100%;padding:28px 18px 40px;}
+ .beta-app .page-title.row {align-items:flex-start;flex-wrap:wrap;gap:16px;}
+ .beta-app .page-title h1,.beta-app .detail h1 {font-size:clamp(30px,8vw,46px);overflow-wrap:anywhere;}
+ .beta-app input,.beta-app select,.beta-app textarea {font-size:16px!important;max-width:100%;min-width:0;}
+ .beta-app input[type="file"] {width:100%;overflow:hidden;}
+ .beta-app input[type="checkbox"] {min-width:22px;min-height:22px;}
+ .beta-app button,.beta-app a.primary,.beta-app a.outline {min-height:44px;}
+ .beta-app .search-box {padding:0 10px;height:auto;min-height:58px;}
+ .beta-app .search-box input {min-width:0;padding:14px 8px;}
+ .beta-app .filter-row {display:grid;grid-template-columns:minmax(0,1fr);gap:16px;}
+ .beta-app .filter-row label {justify-content:space-between;}
+ .beta-app .filter-row select {max-width:70%;padding:10px 6px;}
+ .beta-app .tabs {display:flex;gap:8px;flex-wrap:wrap;}
+ .beta-app .detail>section {display:grid;grid-template-columns:minmax(0,1fr);gap:24px;}
+ .beta-app .detail .beta-cover {width:min(210px,65vw);margin:auto;}
+ .beta-app .detail .actions {display:flex;flex-wrap:wrap;gap:12px;}
+ .beta-app .detail .actions button {flex:1;}
+ .beta-app .toast {bottom:calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + 12px);left:16px;right:16px;transform:none;width:auto;max-width:none;font-size:14px;}
+ .beta-app .modal-backdrop {z-index:60;padding:10px;align-items:center;}
+ .beta-app .book-modal,.beta-app .review-modal {width:100%;max-width:100%;max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow-y:auto;overscroll-behavior:contain;padding:22px 16px;border-radius:16px;}
+ .beta-app .review-layout,.beta-app .review-fields,.beta-app .individual-fields,.beta-app .import-layout,.beta-app .import-mode-tabs {grid-template-columns:minmax(0,1fr);}
+ .beta-app .review-fields .wide {grid-column:auto;}
+ .beta-app .review-actions,.beta-app .review-actions>div {display:flex;flex-direction:column;align-items:stretch;gap:10px;}
+ .beta-app .review-actions button {width:100%;white-space:normal;}
+ .beta-app .file-check,.beta-app .batch-list article {overflow-wrap:anywhere;}
+ .beta-app .catalog-admin-table table,.beta-app .catalog-admin-table tbody {display:block;min-width:0;width:100%;}
+ .beta-app .catalog-admin-table thead {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
+ .beta-app .catalog-admin-table tr {display:block;border:1px solid #e5d7e2;border-radius:14px;padding:12px;margin-bottom:14px;background:#fff;}
+ .beta-app .catalog-admin-table td {display:grid;grid-template-columns:75px minmax(0,1fr);gap:10px;border:0;padding:8px 4px;white-space:normal;overflow-wrap:anywhere;font-size:14px;}
+ .beta-app .catalog-admin-table td:before {content:attr(data-label);font-size:12px;color:#77617a;font-weight:700;}
+ .beta-app .reader {min-height:100dvh;}
+ .beta-app .reader-top {display:flex;flex-wrap:wrap;gap:10px;padding:10px 14px;align-items:center;}
+ .beta-app .reader-top>b {flex:1;min-width:0;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;}
+ .beta-app .reader-controls {display:flex;width:100%;justify-content:center;gap:12px;}
+ .beta-app .reader-controls button {min-width:44px;}
+ .beta-app .reader article {width:100%;padding:24px 20px calc(70px + env(safe-area-inset-bottom));}
+ .beta-app .reader article p {hyphens:auto;overflow-wrap:anywhere;scroll-margin-top:145px;}
+ .beta-app .beta-reader-status {padding-bottom:calc(10px + env(safe-area-inset-bottom));}
+ .beta-app .pdf-reader {padding:18px 14px 65px;}
+ .beta-app .pdf-reader iframe {height:65vh;height:65dvh;min-height:320px;margin-top:16px;}
+ .beta-app .reader-end {flex-direction:column;}
+ .beta-app:has(.reader) {padding-bottom:0;}
+ .beta-app .master-login {padding:12px 0;margin:10px auto;}
+ .beta-app .master-toolbar {align-items:stretch;flex-direction:column;}
+}
+@media (max-width:360px) {
+ .beta-app .r3-featured-cover {width:135px;}
+ .beta-app .r3-cover-fan {height:255px;}
+ .beta-app .r3-hero {padding-inline:16px;}
+ .beta-app .r3-hero-actions {flex-direction:column;}
+ .beta-app .r3-suggestion-card {grid-template-columns:84px minmax(0,1fr);gap:12px;padding:14px;}
+}
+@media (pointer:coarse) {
+ .beta-app .favorite-control {min-width:44px;min-height:44px;}
+ .beta-app .r3-book-rail {overscroll-behavior-x:contain;}
+}
