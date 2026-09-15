@@ -81,3 +81,5 @@
 .native-connection img {width:160px;}
 .native-connection h1 {font:600 30px/1.2 Georgia,serif;margin:0;}
 .native-connection p {font-size:16px;line-height:1.6;margin:0 0 12px;}
+
+.beta-library-section{margin-block:2rem}.beta-library-section>h2{margin-bottom:1rem}.beta-library-section .library-empty{padding:1.25rem;border-radius:1rem;background:var(--surface, #fff8f1)}.beta-library-section .library-empty p{margin:0 0 1rem}

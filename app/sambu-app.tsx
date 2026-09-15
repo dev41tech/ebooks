@@ -8,6 +8,7 @@ type Book = { id: string; title: string; author: string; genre: string; descript
 type Section = { id: string; body: string[]; minutes: number };
 type Location = { position: number; progress: number; revision?:number };
 type ApiPayload = { recommendations?:{bookId:string;reason:string}[]; configured?:boolean; unlocked?:boolean; error?: string; message?: string; books?: Book[]; chapters?: Section[]; profile?: { displayName?: string }; favorites?: string[]; locations?: Record<string,Location>; batches?: ImportBatch[]; items?: StagedBook[]; uploadId?: string; chunkSize?: number; batch: { validItems:number; errorItems:number }; publishedBookId?:string; storageKey?:string; fileName?:string; contentType?:string; fileSize?:number };
+const searchText=(value:string)=>value.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLocaleLowerCase("pt-BR").trim().replace(/\s+/g," ");
 const NAV: { id: View; label: string }[] = [{id:"home",label:"Início"},{id:"catalog",label:"Explorar"},{id:"library",label:"Minha biblioteca"}];
 const messages: Record<string,string> = { master_required:"Digite a senha master para abrir a administração.", master_password_length:"Use uma senha entre 12 e 128 caracteres.", master_invalid_password:"Senha master incorreta.", master_rate_limited:"Muitas tentativas. Aguarde 15 minutos antes de tentar novamente.", master_already_configured:"A senha master já foi criada. Recarregue a página e entre com ela.", master_setup_required:"Crie a senha master no primeiro acesso.", sign_in_required:"Entre na sua conta para continuar.", invitation_required:"Esta conta ainda não está na lista de participantes do beta.", admin_required:"Esta área é exclusiva da administração.", invalid_book_content:"O arquivo não pôde ser lido. Confira o EPUB (até 32 MB) ou PDF antes de publicar.", review_required:"Publique esta obra pela revisão da importação.", published_import_protected:"Esta importação possui uma obra vinculada. Seus arquivos estão protegidos.", book_file_required:"Selecione um arquivo válido para o livro.", review_incomplete:"Confira os dados e confirme os direitos para publicar." };
 async function requestJson(url: string, options?: RequestInit) {
@@ -30,6 +31,7 @@ export default function SambuApp({user}:{user:User}) {
   const booksRef = useRef<Book[]>([]);
   const [books,setBooks] = useState<Book[]>([]), [selected,setSelected] = useState<Book|null>(null);
   const [sections,setSections] = useState<Section[]>([]), [favorites,setFavorites] = useState<string[]>([]);
+  const [libraryLoading,setLibraryLoading]=useState(!!user?.participant),[libraryError,setLibraryError]=useState("");
   const [locations,setLocations] = useState<Record<string,Location>>({});
   const [query,setQuery] = useState(""), [genre,setGenre] = useState("Todos"), [sort,setSort] = useState("recent");
   const [loading,setLoading] = useState(true), [error,setError] = useState(""), [toast,setToast] = useState("");
@@ -56,6 +58,13 @@ export default function SambuApp({user}:{user:User}) {
     catch(e){setError((e as Error).message);return null;}
     finally{setLoading(false);}
   },[]);
+  const loadLibrary=useCallback(async()=>{
+    if(!user?.participant)return;
+    setLibraryLoading(true);setLibraryError("");
+    try{const [saved,progress]=await Promise.all([requestJson("/api/favorites",{cache:"no-store"}),requestJson("/api/progress",{cache:"no-store"})]);setFavorites(saved.favorites||[]);setLocations(progress.locations||{});}
+    catch{setLibraryError("Não foi possível atualizar sua biblioteca. Suas leituras continuam guardadas na conta.");}
+    finally{setLibraryLoading(false);}
+  },[user?.email,user?.participant]);
   const startReading = useCallback(async(book:Book)=>{
     if(!user){notify("Entre na sua conta para ler.");navigate("profile");return;}
     if(!user.participant){notify(messages.invitation_required);navigate("profile");return;}
@@ -70,12 +79,7 @@ export default function SambuApp({user}:{user:User}) {
     let active=true;
     const restore=async()=>{
       const rows=await load();if(!active||!rows)return;
-      if(user?.participant){
-        const results=await Promise.allSettled([requestJson("/api/favorites"),requestJson("/api/progress")]);
-        if(!active)return;
-        if(results[0].status==="fulfilled")setFavorites(results[0].value.favorites||[]);else notify("Não foi possível carregar seus favoritos.");
-        if(results[1].status==="fulfilled")setLocations(results[1].value.locations||{});else notify("Não foi possível carregar seu progresso.");
-      }
+      await loadLibrary();if(!active)return;
       const params=new URLSearchParams(window.location.search);const target=params.get("view") as View;
       const book=rows.find(b=>b.id===params.get("book"));
       if(book){setSelected(book);if(target==="reader")await startReading(book);else setView("detail");}
@@ -95,7 +99,7 @@ export default function SambuApp({user}:{user:User}) {
     if(favoriteBusy)return;setFavoriteBusy(true);
     try{const value=!favorites.includes(id);await requestJson("/api/favorites",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({bookId:id,favorite:value})});setFavorites(v=>value?[...v,id]:v.filter(x=>x!==id));notify(value?"Livro salvo na biblioteca.":"Livro removido dos favoritos.");}catch(e){notify((e as Error).message);}finally{setFavoriteBusy(false);}
   }
-  useEffect(()=>{if(!user?.participant||view==="reader")return;let active=true;const refresh=()=>{if(document.visibilityState!=="visible")return;requestJson("/api/progress",{cache:"no-store"}).then(d=>{if(active)setLocations(d.locations||{});}).catch(()=>{});};refresh();window.addEventListener("focus",refresh);document.addEventListener("visibilitychange",refresh);return()=>{active=false;window.removeEventListener("focus",refresh);document.removeEventListener("visibilitychange",refresh);};},[user?.email,user?.participant,view]);
+  useEffect(()=>{if(!user?.participant||view==="reader")return;const refresh=()=>{if(document.visibilityState==="visible")void loadLibrary();};window.addEventListener("focus",refresh);document.addEventListener("visibilitychange",refresh);if(view==="library")refresh();return()=>{window.removeEventListener("focus",refresh);document.removeEventListener("visibilitychange",refresh);};},[user?.participant,view,loadLibrary]);
   const save = useCallback(async(bookId:string,location:Location):Promise<Location>=>{
     const response=await apiFetch("/api/progress",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({bookId,...location}),keepalive:true,cache:"no-store"});
     const data=await response.json() as {location?:Location};
@@ -103,7 +107,7 @@ export default function SambuApp({user}:{user:User}) {
     if(!response.ok||!data.location)throw new Error("Não foi possível salvar a leitura.");
     setLocations(current=>({...current,[bookId]:data.location!}));return data.location;
   },[]);
-  const filtered=useMemo(()=>books.filter(b=>(genre==="Todos"||b.genre===genre)&&`${b.title} ${b.author} ${b.genre}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a,b)=>sort==="title"?a.title.localeCompare(b.title,"pt-BR"):(b.publishedAt||"").localeCompare(a.publishedAt||"")),[books,query,genre,sort]);
+  const filtered=useMemo(()=>books.filter(b=>(genre==="Todos"||b.genre===genre)&&searchText(`${b.title} ${b.author} ${b.genre}`).includes(searchText(query))).sort((a,b)=>sort==="title"?a.title.localeCompare(b.title,"pt-BR"):(b.publishedAt||"").localeCompare(a.publishedAt||"")),[books,query,genre,sort]);
   const cards=(list:Book[])=><div className="book-grid">{list.map(book=><BookCard key={book.id} book={book} saved={favorites.includes(book.id)} onOpen={()=>navigate("detail",book)} onFavorite={()=>favorite(book.id)}/>)}</div>;
   return <div className="app-shell beta-app">
     {view!=="reader"&&<header><button className="brand" onClick={()=>navigate("home")} aria-label="Início Sambu"><img src="/sambu-logo.png" alt="Sambu"/></button><nav aria-label="Navegação principal">{NAV.map(item=><button key={item.id} className={view===item.id?"active":""} onClick={()=>navigate(item.id)}>{item.label}</button>)}{user?.admin&&<button onClick={()=>navigate("admin")}>Administração</button>}</nav><button className="outline" onClick={()=>navigate("profile")}>{user?"Minha conta":"Entrar"}</button></header>}
@@ -115,7 +119,11 @@ export default function SambuApp({user}:{user:User}) {
       <div className="filter-row"><label>Gênero <select value={genre} onChange={e=>{setGenre(e.target.value);if(e.target.value!=="Todos")rememberSearch(e.target.value);}}><option>Todos</option>{Array.from(new Set(books.map(b=>b.genre))).sort().map(g=><option key={g}>{g}</option>)}</select></label><label>Ordenar <select value={sort} onChange={e=>setSort(e.target.value)}><option value="recent">Mais recentes</option><option value="title">Título A–Z</option></select></label></div>
       {loading?<p role="status">Carregando acervo…</p>:error?<div role="alert"><p>{error}</p><button className="outline" onClick={load}>Tentar novamente</button></div>:<><p>{filtered.length} {filtered.length===1?"livro encontrado":"livros encontrados"}</p>{filtered.length?cards(filtered):<div className="library-empty"><h2>{books.length?"Nenhum resultado":"O acervo está sendo preparado"}</h2><p>{books.length?"Tente outro título ou gênero.":"As obras aprovadas aparecerão aqui."}</p></div>}</>}
     </main>}
-    {view==="library"&&<main className="page"><h1>Minha biblioteca</h1>{!user?.participant?<AccessNotice user={user}/>:<><h2>Continue sua leitura</h2>{books.filter(b=>locations[b.id]?.progress>0&&locations[b.id]?.progress<100).length?books.filter(b=>locations[b.id]?.progress>0&&locations[b.id]?.progress<100).map(b=><article className="beta-continue" key={b.id}><Cover book={b}/><div className="continue-info"><h3>{b.title}</h3><p className="continue-percent">{locations[b.id].progress}% lido</p><progress className="reading-progress" value={locations[b.id].progress} max={100} aria-label={`Progresso da leitura de ${b.title}`}>{locations[b.id].progress}%</progress></div><button className="primary continue-button" disabled={readingBusy} onClick={()=>startReading(b)}>Continuar leitura</button></article>):<p>Você ainda não tem leituras em andamento.</p>}<h2>Favoritos</h2>{favorites.length?cards(books.filter(b=>favorites.includes(b.id))):<p>Toque no coração de um livro para guardá-lo aqui.</p>}<h2>Concluídos</h2>{cards(books.filter(b=>locations[b.id]?.progress===100))}</>}</main>}
+    {view==="library"&&<main className="page"><h1>Minha biblioteca</h1>{!user?.participant?<AccessNotice user={user}/>:loading||libraryLoading?<p role="status">Atualizando sua biblioteca…</p>:error||libraryError?<div className="library-empty" role="alert"><h2>Sua biblioteca não pôde ser atualizada</h2><p>{error||libraryError}</p><button className="outline" onClick={()=>{void load();void loadLibrary();}}>Tentar novamente</button></div>:<>
+      <section className="beta-library-section"><h2>Continue sua leitura</h2>{books.some(b=>locations[b.id]?.progress>0&&locations[b.id]?.progress<100)?books.filter(b=>locations[b.id]?.progress>0&&locations[b.id]?.progress<100).map(b=><article className="beta-continue" key={b.id}><Cover book={b}/><div className="continue-info"><h3>{b.title}</h3><p className="continue-percent">{locations[b.id].progress}% lido</p><progress className="reading-progress" value={locations[b.id].progress} max={100} aria-label={`Progresso da leitura de ${b.title}`}/></div><button className="primary continue-button" disabled={readingBusy} onClick={()=>startReading(b)}>{readingBusy?"Abrindo…":"Continuar leitura"}</button></article>):<div className="library-empty"><p>Seu próximo momento de leitura começa com uma escolha.</p><button className="outline" onClick={()=>navigate("catalog")}>Encontrar um livro</button></div>}</section>
+      <section className="beta-library-section"><h2>Livros salvos</h2>{books.some(b=>favorites.includes(b.id))?cards(books.filter(b=>favorites.includes(b.id))):<div className="library-empty"><p>Toque no coração de um livro para guardá-lo aqui.</p><button className="outline" onClick={()=>navigate("home")}>Ver sugestões de leitura</button></div>}</section>
+      <section className="beta-library-section"><h2>Concluídos</h2>{books.some(b=>locations[b.id]?.progress===100)?cards(books.filter(b=>locations[b.id]?.progress===100)):<p>Os livros que você concluir aparecerão aqui.</p>}</section>
+    </>}</main>}
     {view==="detail"&&selected&&<main className="detail"><button className="back" onClick={()=>navigate("catalog")}>← Voltar ao acervo</button><section><Cover book={selected}/><div className="book-info"><p>{selected.genre}</p><h1>{selected.title}</h1><p>por {selected.author}</p><p className="blurb">{selected.description}</p><p>{selected.format||"Ebook"} · Disponível no beta por convite</p><div className="actions"><button className="primary" disabled={readingBusy} onClick={()=>startReading(selected)}>{readingBusy?"Abrindo…":locations[selected.id]?.progress&&locations[selected.id].progress<100?"Continuar leitura":"Ler agora"}</button><button className="outline" disabled={favoriteBusy} onClick={()=>favorite(selected.id)}>{favorites.includes(selected.id)?"♥ Salvo":"♡ Salvar"}</button></div></div></section></main>}
     {view==="reader"&&selected&&<Reader key={selected.id} book={selected} sections={sections} initial={locations[selected.id]||{position:0,progress:0}} theme={theme} font={font} preference={preference} onSave={save} onBack={()=>navigate("detail",selected)}/>}
     {view==="profile"&&<Profile user={user} notify={notify}/>}
