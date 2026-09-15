@@ -83,3 +83,5 @@
 .native-connection p {font-size:16px;line-height:1.6;margin:0 0 12px;}
 
 .beta-library-section{margin-block:2rem}.beta-library-section>h2{margin-bottom:1rem}.beta-library-section .library-empty{padding:1.25rem;border-radius:1rem;background:var(--surface, #fff8f1)}.beta-library-section .library-empty p{margin:0 0 1rem}
+
+.import-mode-tabs{flex-wrap:wrap}.bulk-upload-list{display:grid;gap:.75rem}.bulk-upload-row{display:flex;align-items:center;flex-wrap:wrap;gap:.75rem;padding:1rem;border:1px solid #ddd;border-radius:12px}.bulk-upload-row strong{flex:1 1 180px;overflow-wrap:anywhere;min-width:0}.bulk-upload-row span{flex:1 1 140px;font-size:14px}.bulk-upload-row small{font-size:14px}

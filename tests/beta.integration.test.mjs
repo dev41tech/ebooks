@@ -161,3 +161,20 @@ test('web and mobile resume the same position and stale device writes cannot ove
  const reread=await routes.progress.POST(payload({bookId:publishedId,position:12,progress:35,revision:latest.revision}));assert.equal(reread.status,200);
  assert.equal((await (await routes.progress.GET()).json()).locations[publishedId].position,12);
 });
+
+test('bulk uploads enter review together without invented authors or automatic publication',async()=>{
+ identity.email=admin;await db.prepare('DELETE FROM master_attempts').run();
+ const login=await routes.master.POST(masterRequest('login'));assert.equal(login.status,200);identity.cookie=login.headers.get('set-cookie').split(';')[0];
+ const uploads=[];
+ for(const fileName of ['Lote um.epub','Lote dois.epub']){
+  const storageKey=`imports/direct/${fileName}`;
+  await env.BUCKET.put(storageKey,epub,{httpMetadata:{contentType:'application/epub+zip'},customMetadata:{owner:admin}});
+  uploads.push({fileName,storageKey,contentType:'application/epub+zip',fileSize:epub.length});
+ }
+ const form=new FormData();form.set('mode','batch');form.set('name','Lote sem planilha');form.set('uploadedFiles',JSON.stringify(uploads));
+ form.set('manifest',new File([JSON.stringify(uploads.map(f=>({title:f.fileName,author:'',licenseType:'',fileName:f.fileName})))],'livros.json',{type:'application/json'}));
+ const response=await routes.imports.POST(new Request('https://sambu.test/api',{method:'POST',body:form}));assert.equal(response.status,201);
+ const data=await response.json();assert.equal(data.batch.errorItems,2);
+ const rows=await db.prepare("SELECT * FROM staging_books WHERE file_name IN ('Lote um.epub','Lote dois.epub')").all();assert.equal(rows.results.length,2);
+ for(const row of rows.results){assert.equal(row.published_book_id,null);assert.equal(row.rights_confirmed,0);assert.ok(row.storage_key);}
+});

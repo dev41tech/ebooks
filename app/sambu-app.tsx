@@ -225,11 +225,12 @@ function MasterGate({owner,notify,onChange}:{owner:string;notify:(s:string)=>voi
   return <section className="master-login"><p className="eyebrow">ADMINISTRAÇÃO SAMBU</p><h1>{status.configured?"Entrar como master":"Criar senha master"}</h1><p>{status.configured?"Digite sua senha para administrar o acervo.":"Defina a senha que protegerá a administração. Guarde-a em um local seguro."}</p><form className="beta-form" onSubmit={e=>{e.preventDefault();if(!status.configured&&password!==confirm){setError("As senhas não coincidem.");return;}submit(status.configured?"login":"setup");}}><label>Usuário<input value="master" readOnly autoComplete="username"/></label><label>Senha master<input type="password" autoComplete={status.configured?"current-password":"new-password"} required minLength={12} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)} aria-describedby="master-password-hint"/></label><p id="master-password-hint">Use entre 12 e 128 caracteres. O acesso expira em duas horas.</p>{!status.configured&&<label>Confirmar senha<input type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={confirm} onChange={e=>setConfirm(e.target.value)}/></label>}{error&&<p role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?"Aguarde…":status.configured?"Entrar na administração":"Criar senha e entrar"}</button></form></section>;
 }
 function Admin({owner,notify,onChange}:{owner:string;notify:(s:string)=>void;onChange:()=>Promise<unknown>}) {
+  const [importing,setImporting]=useState(false);
   const [tab,setTab]=useState("catalog"),[rows,setRows]=useState<Book[]>([]),[error,setError]=useState(""),[busy,setBusy]=useState(false),[editing,setEditing]=useState<Book|null>(null);
   const reload=useCallback(async()=>{setError("");try{const data=await requestJson("/api/admin/books");setRows(data.books||[]);await onChange();}catch(e){setError((e as Error).message);}},[onChange]);
   useEffect(()=>{reload();},[reload]);
-  return <><div className="page-title"><h1>Administração do acervo</h1><p>{rows.filter(b=>b.status==="published").length} obras publicadas · {rows.filter(b=>b.status!=="published").length} fora do catálogo</p></div><div className="tabs"><button onClick={()=>{setTab("catalog");reload();}}>Acervo</button><button onClick={()=>setTab("imports")}>Importar e revisar</button></div>{error&&<div role="alert"><p>{error}</p><button onClick={reload}>Tentar novamente</button></div>}
-    {tab==="imports"?<ImportCenter owner={owner} notify={message=>{notify(message);reload();}}/>:<>{!rows.length&&!error&&<p>Importe e revise o primeiro ebook para iniciar o acervo.</p>}<div className="admin-table-wrap catalog-admin-table"><table><thead><tr><th>Livro</th><th>Autor</th><th>Situação</th><th>Ação</th></tr></thead><tbody>{rows.map(b=><tr key={b.id}><td data-label="Livro">{b.title}</td><td data-label="Autor">{b.author}</td><td data-label="Situação">{b.status==="published"?"Publicado":"Fora do catálogo"}</td><td data-label="Ação"><button className="outline" onClick={()=>setEditing(b)}>Editar</button></td></tr>)}</tbody></table></div></>}
+  return <><div className="page-title"><h1>Administração do acervo</h1><p>{rows.filter(b=>b.status==="published").length} obras publicadas · {rows.filter(b=>b.status!=="published").length} fora do catálogo</p></div><div className="tabs"><button disabled={importing} onClick={()=>{setTab("catalog");reload();}}>Acervo</button><button disabled={importing} onClick={()=>setTab("imports")}>Importar e revisar</button><button disabled={importing} onClick={()=>setTab("bulk")}>Subir ebooks em lote</button></div>{error&&<div role="alert"><p>{error}</p><button onClick={reload}>Tentar novamente</button></div>}
+    {(tab==="imports"||tab==="bulk")?<ImportCenter onBusy={setImporting} key={tab} initialMode={tab==="bulk"?"quick":"individual"} owner={owner} notify={message=>{notify(message);reload();}}/>:<>{!rows.length&&!error&&<p>Importe e revise o primeiro ebook para iniciar o acervo.</p>}<div className="admin-table-wrap catalog-admin-table"><table><thead><tr><th>Livro</th><th>Autor</th><th>Situação</th><th>Ação</th></tr></thead><tbody>{rows.map(b=><tr key={b.id}><td data-label="Livro">{b.title}</td><td data-label="Autor">{b.author}</td><td data-label="Situação">{b.status==="published"?"Publicado":"Fora do catálogo"}</td><td data-label="Ação"><button className="outline" onClick={()=>setEditing(b)}>Editar</button></td></tr>)}</tbody></table></div></>}
     {editing&&<div className="modal-backdrop"><section className="book-modal" role="dialog" aria-modal="true" aria-labelledby="edit-title"><h2 id="edit-title">Editar obra</h2><form className="beta-form" onSubmit={async e=>{e.preventDefault();const mediaForm=new FormData(e.currentTarget);setBusy(true);try{await requestJson("/api/admin/books",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(editing)});for(const kind of ["cover","epub"]){const file=mediaForm.get(kind);if(file instanceof File&&file.size){const media=new FormData();media.set("file",file);media.set("kind",kind);media.set("bookId",editing.id);await requestJson("/api/media",{method:"POST",body:media});}}await reload();setEditing(null);notify("Obra atualizada.");}catch(e){notify((e as Error).message);}finally{setBusy(false);}}}><label>Título<input value={editing.title} required onChange={e=>setEditing({...editing,title:e.target.value})}/></label><label>Autor<input value={editing.author} required onChange={e=>setEditing({...editing,author:e.target.value})}/></label><label>Gênero<input value={editing.genre} required onChange={e=>setEditing({...editing,genre:e.target.value})}/></label><label>Sinopse<textarea value={editing.description} required onChange={e=>setEditing({...editing,description:e.target.value})}/></label><label>Substituir capa (opcional)<input type="file" name="cover" accept="image/jpeg,image/png,image/webp"/></label><label>Substituir ebook (opcional, até 32 MB)<input type="file" name="epub" accept="application/epub+zip,application/pdf"/></label><label>Visibilidade<select value={editing.status} onChange={e=>setEditing({...editing,status:e.target.value})}><option value="published">Publicado</option><option value="draft">Despublicado</option><option value="archived">Arquivado</option></select></label><div><button type="button" className="outline" onClick={()=>setEditing(null)}>Cancelar</button><button disabled={busy} className="primary">{busy?"Salvando…":"Salvar alterações"}</button></div></form></section></div>}
   </>;
 }
@@ -265,11 +266,17 @@ type StagedBook = {
   status: string;
 };
 
-function ImportCenter({ notify, owner }: { notify: (message: string) => void; owner: string }) {
+function ImportCenter({ notify, owner, onBusy, initialMode="individual" }: { onBusy:(busy:boolean)=>void; notify: (message: string) => void; owner: string; initialMode?:"individual"|"quick" }) {
   const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [items, setItems] = useState<StagedBook[]>([]);
   const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState<"individual" | "batch">("individual");
+  useEffect(()=>{onBusy(busy);return()=>onBusy(false);},[busy,onBusy]);
+  const [mode, setMode] = useState<"individual" | "batch" | "quick">(initialMode);
+  const [queue,setQueue]=useState<{file:File;status:string;uploaded?:ApiPayload;registered?:boolean}[]>([]);
+  const queueRef=useRef(queue);
+  const updateQueue=(next:typeof queue)=>{queueRef.current=next;setQueue(next);};
+  const updateFile=(index:number,patch:Partial<(typeof queue)[number]>)=>updateQueue(queueRef.current.map((item,i)=>i===index?{...item,...patch}:item));
+  useEffect(()=>{if(!busy)return;const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue="";};window.addEventListener("beforeunload",warn);return()=>window.removeEventListener("beforeunload",warn);},[busy]);
   const [folderPath, setFolderPath] = useState("");
   const [selected, setSelected] = useState<StagedBook | null>(null);
   const [uploadStage, setUploadStage] = useState("");
@@ -285,7 +292,7 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
     load().catch(error => notify(error.message));
   }, []);
 
-  async function uploadIndividual(file: File) {
+  async function uploadIndividual(file: File, progress?:(text:string)=>void) {
     const limit = file.name.toLowerCase().endsWith(".epub") ? 32_000_000 : 250_000_000;
     if (file.size > limit) throw new Error("Arquivo acima do limite: EPUB 32 MB; PDF 250 MB.");
     const resumeKey = `sambu:upload:${owner}:${file.name}:${file.size}:${file.lastModified}`;
@@ -310,7 +317,7 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
     const chunkSize = Number(initialized.chunkSize);
     const totalParts = Math.ceil(file.size / chunkSize);
     for (let part = resumed?.nextPart || 0; part < totalParts; part++) {
-      setUploadStage(`Enviando ebook… ${Math.round(part / totalParts * 100)}%`);
+      setUploadStage(`Enviando ${file.name}… ${Math.round(part / totalParts * 100)}%`);progress?.(`Enviando · ${Math.round(part / totalParts * 100)}%`);
       const chunk = file.slice(part * chunkSize, (part + 1) * chunkSize);
       let response: Response | undefined;
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -335,7 +342,7 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
       try { localStorage.setItem(resumeKey,JSON.stringify({uploadId:initialized.uploadId,chunkSize,nextPart:part+1})); } catch {}
     }
 
-    setUploadStage("Finalizando o ebook…");
+    setUploadStage("Finalizando o ebook…");progress?.("Finalizando arquivo…");
     const completeResponse = await apiFetch("/api/admin/uploads?v=3", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -357,11 +364,26 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
 
   async function importBatch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if(busy)return;
     setBusy(true);
     const form = event.currentTarget;
     setUploadStage(mode === "individual" ? "Preparando o ebook…" : "Processando lote…");
     try {
       const requestForm = new FormData(form);
+      if(mode==="quick"){
+        if(!queueRef.current.length)throw new Error("Selecione ao menos um EPUB ou PDF.");
+        for(let i=0;i<queueRef.current.length;i++){
+          const item=queueRef.current[i];if(item.registered||item.uploaded)continue;
+          try{const uploaded=await uploadIndividual(item.file,status=>updateFile(i,{status}));updateFile(i,{uploaded,status:"Enviado · aguardando registro"});}
+          catch(error){updateFile(i,{status:`Falha: ${(error as Error).message}`});}
+        }
+        const ready=queueRef.current.filter(item=>item.uploaded&&!item.registered);
+        if(!ready.length)throw new Error("Nenhum novo arquivo enviado. Confira os erros abaixo.");
+        const rows=ready.map(item=>({title:item.file.name.replace(/\.(epub|pdf)$/i,""),author:"",licenseType:"",fileName:item.uploaded!.fileName}));
+        requestForm.set("mode","batch");
+        requestForm.set("manifest",new File([JSON.stringify(rows)],"livros.json",{type:"application/json"}));
+        requestForm.set("uploadedFiles",JSON.stringify(ready.map(item=>item.uploaded)));
+      }
       if (mode === "individual") {
         const file = requestForm.get("singleFile");
         if (!(file instanceof File) || !file.size)
@@ -378,12 +400,13 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
       const data = await response.json().catch(() => ({})) as ApiPayload;
       if (!response.ok)
         throw new Error(data.error || `import_${response.status}`);
+      if(mode==="quick")updateQueue(queueRef.current.map(item=>item.uploaded?{...item,registered:true,status:"Na fila de revisão"}:item));
       notify(
         mode === "individual"
           ? `Livro recebido: ${data.batch.validItems} válido e ${data.batch.errorItems} para revisar.`
           : `Lote recebido: ${data.batch.validItems} válidos e ${data.batch.errorItems} para revisar.`,
       );
-      form.reset();
+      if(mode!=="quick")form.reset();
       setFolderPath("");
       await load();
     } catch (error) {
@@ -486,7 +509,7 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
       >
         <button
           className={mode === "individual" ? "active" : ""}
-          onClick={() => setMode("individual")}
+          disabled={busy} onClick={() => setMode("individual")}
         >
           <span>01</span>
           <b>Livro individual</b>
@@ -494,12 +517,13 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
         </button>
         <button
           className={mode === "batch" ? "active" : ""}
-          onClick={() => setMode("batch")}
+          disabled={busy} onClick={() => setMode("batch")}
         >
           <span>02</span>
-          <b>Importação em lote</b>
+          <b>Lote com planilha</b>
           <small>Selecione uma pasta</small>
         </button>
+        <button disabled={busy} className={mode==="quick"?"active":""} onClick={()=>setMode("quick")}><span>03</span><b>Subir ebooks em lote</b><small>Vários arquivos, sem planilha</small></button>
       </div>
 
       <div className="import-layout">
@@ -510,12 +534,12 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
               <h3>
                 {mode === "individual"
                   ? "Importar livro ou ebook"
-                  : "Importar pasta de livros"}
+                  : mode==="quick"?"Subir ebooks em lote":"Importar pasta de livros"}
               </h3>
               <small>
                 {mode === "individual"
                   ? "EPUB ou PDF"
-                  : "Pasta com CSV/JSON + arquivos"}
+                  : mode==="quick"?"Até 50 arquivos EPUB ou PDF":"Pasta com CSV/JSON + arquivos"}
               </small>
             </div>
             <span className="step-badge">
@@ -534,7 +558,16 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
               <option>Autores parceiros</option>
             </select>
           </label>
-          {mode === "individual" ? (
+          {mode==="quick"?<>
+            <label>Nome do lote<input name="name" required disabled={busy} placeholder="Novos livros — setembro"/></label>
+            <label className="drop-field featured-drop"><b>Selecionar ebooks</b><span>EPUB até 32 MB · PDF até 250 MB por arquivo</span><input type="file" accept=".epub,.pdf" multiple disabled={busy} onChange={event=>{
+              const files=Array.from(event.target.files||[]);
+              if(files.length>50||files.some(f=>!f.size||! /\.(epub|pdf)$/i.test(f.name))||new Set(files.map(f=>f.name.toLowerCase())).size!==files.length){notify("Selecione até 50 EPUBs ou PDFs não vazios, com nomes diferentes.");event.target.value="";return;}
+              updateQueue(files.map(file=>({file,status:"Aguardando envio"})));
+            }}/></label>
+            <p>O nome do arquivo será usado como título inicial. Confira autor, capa e licença na revisão. Mantenha esta tela aberta durante o envio.</p>
+            {!!queue.length&&<div className="bulk-upload-list" aria-live="polite"><p>{queue.length} arquivos · {queue.filter(item=>item.registered).length} na revisão</p>{queue.map((item,i)=><div className="bulk-upload-row" key={i}><strong>{item.file.name}</strong><small>{(item.file.size/1000000).toFixed(1)} MB</small><span>{item.status}</span>{!busy&&!item.registered&&!item.uploaded&&<button type="button" className="outline" onClick={()=>updateQueue(queueRef.current.filter((_,index)=>index!==i))}>Remover</button>}</div>)}</div>}
+          </>:mode === "individual" ? (
             <>
               <div className="individual-fields">
                 <label>
@@ -664,12 +697,12 @@ function ImportCenter({ notify, owner }: { notify: (message: string) => void; ow
               </div>
             </>
           )}
-          <button className="primary import-submit" disabled={busy}>
+          <button className="primary import-submit" disabled={busy||(mode==="quick"&&(!queue.length||queue.every(item=>item.registered)))}>
             {busy
               ? uploadStage || "Processando…"
               : mode === "individual"
                 ? "Validar e importar livro"
-                : "Validar e importar pasta"}
+                : mode==="quick"?"Enviar pendentes para revisão":"Validar e importar pasta"}
           </button>
         </form>
 
