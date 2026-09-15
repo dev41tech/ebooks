@@ -87,3 +87,5 @@
 .import-mode-tabs{flex-wrap:wrap}.bulk-upload-list{display:grid;gap:.75rem}.bulk-upload-row{display:flex;align-items:center;flex-wrap:wrap;gap:.75rem;padding:1rem;border:1px solid #ddd;border-radius:12px}.bulk-upload-row strong{flex:1 1 180px;overflow-wrap:anywhere;min-width:0}.bulk-upload-row span{flex:1 1 140px;font-size:14px}.bulk-upload-row small{font-size:14px}
 
 .ebook-delete-area{border-top:1px solid #ddd;margin-top:1.5rem;padding-top:1.25rem}.ebook-delete-area p{font-size:14px;line-height:1.6}.ebook-delete-button{background:#a51d32;color:#fff;border:0;border-radius:10px;padding:12px 18px;min-height:44px;margin:8px 8px 8px 0}.ebook-delete-button:disabled{opacity:.5;cursor:not-allowed}
+
+.beta-app .reader-controls{flex-wrap:wrap}.beta-app .reader-controls button{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px}.beta-app .reader-controls button:disabled{opacity:.45;cursor:default}
