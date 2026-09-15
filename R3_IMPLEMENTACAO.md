@@ -68,3 +68,13 @@ A senha é armazenada somente como derivação PBKDF2-SHA256 com salt aleatório
 Não há recuperação automática de senha nesta versão; guarde a senha em seu gerenciador. A redefinição, se necessária, deverá ser realizada pelo responsável autorizado pela hospedagem, revogando também as sessões existentes.
 
 Validação desta atualização: TypeScript aprovado e 13 testes de integração aprovados, incluindo bloqueio sem sessão, senha inválida, autorização por conta, origem das requisições, expiração, encerramento de sessão e limite de tentativas.
+
+## Atualização: sugestões personalizadas
+
+A seção de categorias na página inicial foi substituída por “Sugestões para você”, com capas reais do acervo, motivo da indicação e botão de inclusão na biblioteca (favoritos). Categorias continuam acessíveis pelo catálogo e pela faixa superior da página inicial.
+
+As recomendações usam afinidade de palavras nos títulos/sinopses, gênero, autoria, buscas recentes e livros salvos ou com leitura iniciada. São regras locais, sem serviço externo de IA. Não sugerem obras não publicadas, já salvas ou com progresso. Sem histórico, apresentam novidades elegíveis; sem candidatos, mostram um estado vazio explicativo.
+
+A migração `0008_overrated_blazing_skull.sql` adiciona buscas por conta. Mantém até 12 consultas distintas e considera apenas os últimos 90 dias; buscas seguintes removem registros antigos. Visitantes não têm buscas gravadas. A busca textual é registrada após uma pausa de um segundo ou envio pela página inicial; seleção de gênero também contribui. Cada conta acessa somente suas próprias sugestões.
+
+Validação: TypeScript, build, renderização e 15 testes de integração aprovados, incluindo afinidade, exclusões, gravação de buscas limitada e isolamento entre contas.

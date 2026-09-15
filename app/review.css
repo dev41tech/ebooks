@@ -813,3 +813,24 @@
  .r3-reading-banner {padding:30px 24px;align-items:flex-start;flex-direction:column;gap:14px;}
 }
 @media(prefers-reduced-motion:reduce){.r3-home * {transition:none!important;scroll-behavior:auto!important;}}
+
+/* Sugestões com capas reais e inclusão direta na biblioteca. */
+.r3-suggestions-intro {max-width:650px;color:#66596b;font-size:16px;line-height:1.6;margin:12px 0 0;}
+.r3-suggestion-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px;}
+.r3-suggestion-card {display:grid;grid-template-columns:125px minmax(0,1fr);align-content:start;gap:20px;background:linear-gradient(145deg,#fff,#fcf4fb);border:1px solid #eadce7;border-radius:20px;padding:24px;box-shadow:0 10px 26px #47213c08;}
+.r3-suggestion-cover {align-self:start;padding:0;background:none;border:0;border-radius:8px;text-align:left;}
+.r3-suggestion-cover .beta-cover {box-shadow:0 10px 20px #30152a24;}
+.r3-suggestion-cover .beta-cover>span {font-size:17px;padding:14px;}
+.r3-suggestion-cover .beta-cover small {font-size:12px;margin-top:10px;}
+.r3-suggestion-info {min-width:0;}
+.r3-suggestion-reason {color:#802762;font-size:13px;line-height:1.5;font-weight:700;margin:0 0 10px;}
+.r3-suggestion-info h3 {font:600 24px/1.16 var(--serif);margin:0 0 8px;overflow-wrap:anywhere;}
+.r3-suggestion-info h3 button {border:0;background:none;color:inherit;font:inherit;padding:0;text-align:left;}
+.r3-suggestion-author {font-size:14px;color:#66556c;margin:0 0 10px;}
+.r3-suggestion-genre {display:inline-block;border:1px solid #dfc6db;color:#773468;border-radius:99px;padding:4px 10px;font-size:12px;}
+.r3-suggestion-description {font-size:14px;line-height:1.6;color:#615668;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin:12px 0 0;}
+.r3-suggestion-actions {grid-column:1/-1;display:flex;align-items:center;flex-wrap:wrap;gap:12px;}
+.r3-suggestion-actions .primary {font-size:14px;flex:1;}
+.r3-suggestion-details {padding:10px 0;background:none;border:0;font-size:14px;color:#74315d;font-weight:700;}
+@media(max-width:800px){.r3-suggestion-grid {grid-template-columns:1fr;}}
+@media(max-width:440px){.r3-suggestion-card {grid-template-columns:100px minmax(0,1fr);padding:18px;gap:16px;}.r3-suggestion-info h3 {font-size:21px;}.r3-suggestion-actions {flex-direction:column;align-items:stretch;}.r3-suggestion-actions .primary {width:100%;}.r3-suggestion-cover .beta-cover>span {font-size:14px;padding:10px;}}

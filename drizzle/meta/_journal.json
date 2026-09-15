@@ -57,6 +57,13 @@
       "when": 1789433443152,
       "tag": "0007_small_the_renegades",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789435162421,
+      "tag": "0008_overrated_blazing_skull",
+      "breakpoints": true
     }
   ]
 }

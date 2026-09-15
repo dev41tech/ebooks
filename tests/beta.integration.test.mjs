@@ -36,7 +36,7 @@ before(async()=>{
    for(const statement of sql.split(';').map(s=>s.replace(/--> statement-breakpoint/g,'').trim()).filter(Boolean))await db.prepare(statement).run();
  }
  const runtimePath=path.join(root,'tests/test-runtime.mjs');
- for(const [name,file] of Object.entries({books:'admin/books',imports:'admin/imports',catalog:'catalog',content:'catalog/content',file:'catalog/file',favorites:'favorites',progress:'progress',profile:'profile',subscription:'subscription',master:'admin/master'})) {
+ for(const [name,file] of Object.entries({books:'admin/books',imports:'admin/imports',catalog:'catalog',content:'catalog/content',file:'catalog/file',favorites:'favorites',progress:'progress',profile:'profile',subscription:'subscription',master:'admin/master',recommendations:'recommendations'})) {
   const outfile=path.join(output,`${name}.mjs`);
   await build({entryPoints:[path.join(root,`app/api/${file}/route.ts`)],outfile,bundle:true,platform:'node',format:'esm',packages:'external',plugins:[{name:'isolated-runtime',setup(b){b.onResolve({filter:/^(cloudflare:workers|next\/headers|next\/navigation)$/},()=>({path:runtimePath,external:true}));}}]});
   routes[name]=await import(pathToFileURL(outfile));
@@ -118,4 +118,34 @@ test('master login limits repeated failures and does not store cleartext passwor
  assert.equal((await routes.master.POST(masterRequest('login'))).status,429);
  const credential=await db.prepare('SELECT * FROM master_credentials').first();
  assert.equal(credential.password_hash.length,64);assert.notEqual(credential.password_hash,'Isolated-test-master-2026');
+});
+
+test('suggestions follow reading themes, exclude saved/read books and unpublished titles',async()=>{
+ identity.email=reader;identity.cookie='';
+ const fixtures=[
+ ['rec-seed','Ansiedade sob controle','Ana','Livre','Ansiedade equilibrio emocional descanso respiracao','published','2026-09-01'],
+ ['rec-related','Respirar para descansar','Beatriz','Livre','Ansiedade equilibrio emocional descanso respiracao','published','2026-09-02'],
+ ['rec-cooking','Receitas de cozinha','Carlos','Culinaria','Receitas cozinha sabores ingredientes','published','2026-09-03'],
+ ['rec-hidden','Ansiedade equilibrio','Ana','Livre','Ansiedade equilibrio emocional descanso respiracao','draft','2026-09-04']
+ ];
+ for(const [id,title,author,genre,description,status,date] of fixtures)await db.prepare('INSERT INTO books(id,title,author,genre,description,status,created_at,published_at) VALUES(?,?,?,?,?,?,?,?)').bind(id,title,author,genre,description,status,date,date).run();
+ assert.equal((await routes.progress.POST(payload({bookId:'rec-seed',position:3,progress:20}))).status,200);
+ let result=await (await routes.recommendations.GET()).json();
+ assert.equal(result.recommendations[0].bookId,'rec-related');
+ assert.match(result.recommendations[0].reason,/Temas próximos/);
+ assert.ok(!result.recommendations.some(r=>['rec-seed','rec-hidden'].includes(r.bookId)));
+ assert.equal((await routes.favorites.POST(payload({bookId:'rec-related',favorite:true}))).status,200);
+ result=await (await routes.recommendations.GET()).json();assert.ok(!result.recommendations.some(r=>r.bookId==='rec-related'));
+});
+test('recent searches personalize only their owner and remain bounded',async()=>{
+ identity.email=reader;
+ for(let i=0;i<14;i++)assert.equal((await routes.recommendations.POST(payload({query:'consulta '+i}))).status,200);
+ assert.equal((await routes.recommendations.POST(payload({query:'Receitas de cozinha'}))).status,200);
+ assert.equal((await routes.recommendations.POST(payload({query:'Receitas de cozinha'}))).status,200);
+ const rows=await db.prepare('SELECT query FROM discovery_searches WHERE user_email=?').bind(reader).all();assert.equal(rows.results.length,12);
+ assert.equal(rows.results.filter(r=>r.query==='receitas de cozinha').length,1);
+ const result=await (await routes.recommendations.GET()).json();assert.equal(result.recommendations[0].bookId,'rec-cooking');assert.match(result.recommendations[0].reason,/buscas recentes/);
+ identity.email=admin;const other=await (await routes.recommendations.GET()).json();assert.ok(other.recommendations.every(r=>r.reason!=='Combina com suas buscas recentes'));
+ identity.email=null;assert.equal((await routes.recommendations.GET()).status,401);
+ assert.equal((await routes.recommendations.POST(payload({query:'Receitas'}))).status,401);
 });

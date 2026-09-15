@@ -250,3 +250,10 @@ export const masterAttempts = sqliteTable("master_attempts", {
   attempts: integer("attempts").notNull(),
   windowStart: integer("window_start").notNull(),
 });
+
+export const discoverySearches = sqliteTable("discovery_searches", {
+  id: text("id").primaryKey(),
+  userEmail: text("user_email").notNull(),
+  query: text("query").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
