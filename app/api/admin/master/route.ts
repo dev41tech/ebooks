@@ -4,7 +4,7 @@ import { digest, equalHash, masterCookie, masterToken, masterUnlocked, passwordH
 const json=(data:unknown,status=200,cookie?:string)=>Response.json(data,{status,headers:{"Cache-Control":"no-store",...(cookie?{"Set-Cookie":cookie}:{})}});
 async function adminIdentity() {
   const s=await sessionAccess();
-  return s.user && s.admin ? s.user : null;
+  return s.user && s.ownerAdmin ? s.user : null;
 }
 export async function GET() {
   const user=await adminIdentity();if(!user)return json({error:"admin_required"},403);

@@ -2,7 +2,7 @@
 import { apiFetch, serviceUrl } from "./lib/client-api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-export type User = { name: string; email: string; admin: boolean; participant: boolean } | null;
+export type User = { name: string; email: string; admin: boolean; participant: boolean; adminTrial?:boolean } | null;
 type View = "home" | "catalog" | "library" | "detail" | "reader" | "profile" | "admin";
 type Book = { id: string; title: string; author: string; genre: string; description: string; format?: string; status: string; publishedAt?: string; coverKey?: string; language?: string; };
 type Section = { id: string; body: string[]; minutes: number };
@@ -132,7 +132,7 @@ export default function SambuApp({user}:{user:User}) {
     {view==="detail"&&selected&&<main className="detail"><button className="back" onClick={()=>navigate("catalog")}>← Voltar ao acervo</button><section><Cover book={selected}/><div className="book-info"><p>{selected.genre}</p><h1>{selected.title}</h1><p>por {selected.author}</p><p className="blurb">{selected.description}</p><p>{selected.format||"Ebook"} · Disponível gratuitamente no beta</p><div className="actions"><button className="primary" disabled={readingBusy} onClick={()=>startReading(selected)}>{openingBookId===selected.id?"Abrindo…":locations[selected.id]?.progress&&locations[selected.id].progress<100?"Continuar leitura":"Ler agora"}</button><button className="outline" disabled={favoriteBusy} onClick={()=>favorite(selected.id)}>{favorites.includes(selected.id)?"♥ Salvo":"♡ Salvar"}</button></div></div></section></main>}
     {view==="reader"&&selected&&<Reader key={selected.id} book={selected} sections={sections} initial={locations[selected.id]||{position:0,progress:0}} theme={theme} font={font} preference={preference} onSave={save} onBack={()=>navigate("detail",selected)}/>}
     {view==="profile"&&<Profile user={user} notify={notify}/>}
-    {view==="admin"&&<main className="page">{user?.admin?<MasterGate owner={user.email} notify={notify} onChange={load}/>:<AccessNotice user={user} admin/>}</main>}
+    {view==="admin"&&<main className="page">{user?.admin?(user.adminTrial?<><p className="beta-banner">Administração de testes · as alterações afetam o acervo real.</p><Admin owner={user.email} notify={notify} onChange={load}/></>:<MasterGate owner={user.email} notify={notify} onChange={load}/>):<AccessNotice user={user} admin/>}</main>}
     {toast&&<div className="toast" role="status">{toast}</div>}
   </div>;
 }

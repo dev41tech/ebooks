@@ -204,3 +204,20 @@ test('open beta permits a new signed-in reader to save name and read without adm
   identity.email=null;assert.equal((await routes.content.GET(new Request(`https://sambu.test/api?id=${publishedId}`))).status,401);
  }finally{delete env.SAMBU_BETA_OPEN;}
 });
+
+test('named administration testers can manage books while other users and master credentials stay protected',async()=>{
+ env.SAMBU_ADMIN_TESTER_EMAILS='admin-tester@example.test';identity.email='admin-tester@example.test';identity.cookie='';
+ try{
+  assert.equal((await routes.books.GET()).status,200);
+  assert.equal((await routes.imports.GET(new Request('https://sambu.test/api'))).status,200);
+  assert.equal((await routes.master.POST(masterRequest('setup'))).status,403);
+  const response=await routes.books.POST(payload({title:'Teste colaborativo',author:'Testador',genre:'Teste',description:'Rascunho criado no teste'}));assert.equal(response.status,201);
+  const {book}=await response.json();
+  assert.equal((await routes.books.PATCH(payload({...book,title:'Teste alterado',status:'draft'},'PATCH'))).status,200);
+  assert.equal((await routes.books.DELETE(payload({id:book.id,confirmTitle:'Teste alterado'},'DELETE'))).status,200);
+  identity.email='uninvited-admin@example.test';assert.equal((await routes.books.GET()).status,403);
+  identity.email=null;assert.equal((await routes.books.GET()).status,401);
+  delete env.SAMBU_ADMIN_TESTER_EMAILS;identity.email='admin-tester@example.test';assert.equal((await routes.books.GET()).status,403);
+  identity.email=admin;assert.equal((await routes.books.GET()).status,403);
+ }finally{delete env.SAMBU_ADMIN_TESTER_EMAILS;}
+});
