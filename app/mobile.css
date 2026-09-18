@@ -92,3 +92,15 @@
 .profile-page{max-width:980px;margin:auto}.profile-card{background:#fff;border:1px solid #e5d7e2;border-radius:22px;padding:28px;box-shadow:0 12px 36px #29152908}.profile-card fieldset{border:0;padding:0;margin:0 0 24px;min-width:0}.profile-card legend{font-weight:750;font-size:20px;margin-bottom:18px}.profile-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.profile-fields label{display:grid;gap:8px}.profile-wide{grid-column:1/-1}.profile-fields small,.profile-note{font-size:14px;color:#665568;line-height:1.6}.profile-fields input[readonly]{background:#f3f0f4;color:#665568}.profile-actions{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.profile-actions a{text-decoration:none}.reader-block{scroll-margin-top:145px}.reader-block p{margin:0 0 30px;text-align:justify;hyphens:auto;overflow-wrap:anywhere}.reader-chapter-title{font-size:1.5em;line-height:1.3;margin:2em 0 1em;text-align:left;overflow-wrap:anywhere}.reader-block:first-child .reader-chapter-title{margin-top:0}
 @media(max-width:760px){.profile-card{padding:22px 16px}.profile-fields{grid-template-columns:minmax(0,1fr)}.profile-actions>*{width:100%;text-align:center}.reader-block p{margin-bottom:25px}}
 .reader-chapter-heading{margin:2em 0 1.25em}.reader-block:first-child .reader-chapter-heading{margin-top:0}.reader-chapter-heading .reader-chapter-number{font-family:var(--sans);font-size:.8em;font-weight:700;text-align:left;letter-spacing:.04em;margin:0 0 .6em}.reader-chapter-heading .reader-chapter-title{margin:0;font-size:1.5em;line-height:1.3}
+
+/* Shared community identity, with the artwork's outer whitespace framed out. */
+.beta-app>header{height:auto;min-height:108px;}
+.beta-app>header .community-brand{position:relative;width:190px;height:92px;overflow:hidden;padding:0;background:#181a1b!important;border-radius:8px!important;}
+.beta-app>header .community-brand img{position:absolute;left:-12%;top:50%;transform:translateY(-50%);display:block;width:124%;height:auto;max-height:none;max-width:none;object-fit:contain;}
+.beta-app>header .community-brand:focus-visible{outline:3px solid #ffce66;outline-offset:3px;}
+.beta-app .r3-welcome img{width:min(100%,320px);height:auto;border-radius:12px;}
+@media(max-width:767px){
+ .beta-app>header{min-height:94px;}
+ .beta-app>header .community-brand{width:154px;height:76px;}
+ .beta-app>header>.outline{flex-shrink:0;}
+}
