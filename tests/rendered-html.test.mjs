@@ -35,6 +35,6 @@ test("renders beta catalog for an unauthenticated visitor", async (t) => {
   assert.match(html, /<title>Sambu<\/title>/);
   assert.match(html, /Sua próxima história/);
   assert.match(html, /Versão beta · entre com ChatGPT para ler gratuitamente/);
-  assert.match(html, /sambu-comunidade-horizontal\.png/);
+  assert.match(html, /sambu-comunidade-horizontal\.webp/);
   assert.doesNotMatch(html, /Painel administrativo/);
 });

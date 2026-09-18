@@ -232,3 +232,41 @@ test('expanded reader profile persists optional fields privately and rejects inv
  assert.equal((await routes.profile.PATCH(payload({displayName:{}},'PATCH'))).status,400);
  identity.email='other-profile@example.test';assert.equal((await (await routes.profile.GET()).json()).profile.tasteProfile,undefined);
 });
+
+test('chapter reads transfer 100 of 4000 paragraphs, preserve global positions and use ranged cache reads',async()=>{
+ const entries={'META-INF/container.xml':strToU8('<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>')};
+ entries['book.opf']=strToU8('<package><manifest>'+Array.from({length:40},(_,i)=>`<item id="c${i}" href="c${i}.xhtml" media-type="application/xhtml+xml"/>`).join('')+'</manifest><spine>'+Array.from({length:40},(_,i)=>`<itemref idref="c${i}"/>`).join('')+'</spine></package>');
+ for(let c=0;c<40;c++)entries[`c${c}.xhtml`]=strToU8(`<html><h1>Capítulo ${c+1} — Tema ${c+1}</h1><body>`+Array.from({length:100},(_,p)=>`<p>Texto português — ação e emoção, posição ${c*100+p}.</p>`).join('')+'</body></html>');
+ identity.email=admin;identity.cookie='';await db.prepare('DELETE FROM master_attempts').run();
+ const login=await routes.master.POST(masterRequest('login'));assert.equal(login.status,200);identity.cookie=login.headers.get('set-cookie').split(';')[0];
+ const key='imports/direct/long-reader.epub';const staged=await stage(key,zipSync(entries));
+ const published=await routes.imports.PATCH(review(staged));assert.equal(published.status,200);
+ const bookId=(await published.json()).publishedBookId;
+ identity.email=reader;
+ const firstResponse=await routes.content.GET(new Request(`https://sambu.test/api?id=${bookId}&position=2555`));
+ assert.equal(firstResponse.status,200);assert.equal(firstResponse.headers.get('cache-control'),'private, no-store');
+ const first=await firstResponse.json();assert.equal('chapters' in first,false);
+ assert.equal(first.reader.totalParagraphs,4000);assert.equal(first.reader.chapterCount,40);assert.equal(first.reader.chapter.index,25);
+ assert.equal(first.reader.chapter.blocks.length,100);assert.equal(first.reader.chapter.blocks[0].position,2500);assert.equal(first.reader.chapter.blocks[55].position,2555);
+ assert.equal(first.reader.chapter.blocks[0].chapterLabel,'Capítulo 26');assert.equal(first.reader.chapter.blocks[0].heading,'Tema 26');
+ assert.match(first.reader.chapter.blocks[55].text,/ação e emoção, posição 2555/);
+ const bucket=env.BUCKET,reads=[];
+ env.BUCKET=new Proxy(bucket,{get(target,name){const value=Reflect.get(target,name);return typeof value==='function'?(...args)=>{if(name==='get')reads.push(args);return value.apply(target,args);}:value;}});
+ try{
+  const next=await (await routes.content.GET(new Request(`https://sambu.test/api?id=${bookId}&chapter=26`))).json();
+  assert.equal(next.reader.chapter.blocks[0].position,2600);
+  assert.ok(reads.some(([key,options])=>key.endsWith('.chapters')&&options.range.length>0));
+  assert.ok(!reads.some(([k])=>k===key||k===`${key}.sambu-content.json`),'warm reads must not download full EPUB or cached full text');
+ }finally{env.BUCKET=bucket;}
+ for(const query of ['chapter=-1','chapter=40','position=abc','position=1&chapter=2']){
+  assert.ok([400,404].includes((await routes.content.GET(new Request(`https://sambu.test/api?id=${bookId}&${query}`))).status));
+ }
+ const beyond=await (await routes.content.GET(new Request(`https://sambu.test/api?id=${bookId}&position=9000`))).json();assert.equal(beyond.reader.chapter.index,39);
+ const full=await (await routes.content.GET(new Request(`https://sambu.test/api?id=${bookId}`))).json();assert.equal(full.chapters.length,40);
+ // Reprocessing the cached source must invalidate the ranged reader cache.
+ full.chapters[0].body[0]='Texto corrigido para a nova edição.';
+ await env.BUCKET.put(`${key}.sambu-content.json`,JSON.stringify(full.chapters));
+ const revised=await (await routes.content.GET(new Request(`https://sambu.test/api?id=${bookId}&chapter=0`))).json();assert.equal(revised.reader.chapter.blocks[0].text,'Texto corrigido para a nova edição.');
+ identity.email=null;assert.equal((await routes.content.GET(new Request(`https://sambu.test/api?id=${bookId}&chapter=0`))).status,401);
+ identity.email=reader;await db.prepare("UPDATE books SET status='archived' WHERE id=?").bind(bookId).run();assert.equal((await routes.content.GET(new Request(`https://sambu.test/api?id=${bookId}&chapter=0`))).status,404);
+});

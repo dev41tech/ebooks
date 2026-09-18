@@ -2,6 +2,8 @@
 
 Data: 18/09/2026. Base avaliada: Sambu R3 Testes, versão publicada 20, commit `be5c0697a3d55fc0b7b328bc7211d34a04533fd7`.
 
+> Atualização posterior à auditoria: a logo exibida foi convertida para WebP (13.260 bytes, redução de 98,7%). O leitor EPUB passou a solicitar e montar um capítulo por vez, com cache no servidor por intervalo de bytes e preservação dos índices globais de progresso. No teste de 4.000 parágrafos em 40 capítulos, cada resposta e tela contém 100 blocos. A avaliação abaixo registra a base anterior; as pendências de dependências e VPS continuam fora do escopo desta correção.
+
 ## Parecer
 
 **GitHub: apto para transferência do código a um repositório privado, com ressalvas de qualidade e segurança. VPS: ainda não apto para produção independente.**

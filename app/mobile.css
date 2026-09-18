@@ -106,3 +106,15 @@
 }
 
 @media(min-width:768px) and (max-width:1100px){.beta-app>header .community-brand{width:220px;height:60px;}}
+
+/* Paged EPUB reading uses the same absolute progress on web and mobile. */
+.reader-chapter-tools{max-width:820px;margin:auto;padding:18px 24px 0;}
+.beta-app .reader-chapter-nav{display:flex;height:auto;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-family:var(--sans);font-size:14px;margin:0 0 24px;}
+.beta-app .reader-chapter-nav button{font-size:14px;min-height:44px;color:inherit;border:1px solid currentColor;}
+.beta-app .reader-chapter-nav button:disabled{opacity:.4;cursor:default;}
+.beta-app .reader-chapter-nav>span{text-align:center;}
+.reader.dark .reader-chapter-tools{color:#e5e1dc;}
+.reader-chapter-tools [role=alert]{padding:12px;border:1px solid currentColor;border-radius:12px;margin-bottom:20px;}
+@media(max-width:560px){.reader-chapter-tools{padding-inline:20px;}.beta-app .reader-chapter-nav{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;}.beta-app .reader-chapter-nav>span{grid-column:1/-1;grid-row:1;}.beta-app .reader-chapter-nav button{padding:10px 8px;}}
+
+.beta-app .reader-chapter-nav button:hover{color:inherit;}
