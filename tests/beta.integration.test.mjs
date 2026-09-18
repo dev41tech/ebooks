@@ -248,7 +248,7 @@ test('chapter reads transfer 100 of 4000 paragraphs, preserve global positions a
  const first=await firstResponse.json();assert.equal('chapters' in first,false);
  assert.equal(first.reader.totalParagraphs,4000);assert.equal(first.reader.chapterCount,40);assert.equal(first.reader.chapter.index,25);
  assert.equal(first.reader.chapter.blocks.length,100);assert.equal(first.reader.chapter.blocks[0].position,2500);assert.equal(first.reader.chapter.blocks[55].position,2555);
- assert.equal(first.reader.chapter.blocks[0].chapterLabel,'Capítulo 26');assert.equal(first.reader.chapter.blocks[0].heading,'Tema 26');
+ assert.equal(first.reader.chapter.navigationLabel,'Capítulo 26 · 40 capítulos');assert.equal(first.reader.chapter.blocks[0].chapterLabel,'Capítulo 26');assert.equal(first.reader.chapter.blocks[0].heading,'Tema 26');
  assert.match(first.reader.chapter.blocks[55].text,/ação e emoção, posição 2555/);
  const bucket=env.BUCKET,reads=[];
  env.BUCKET=new Proxy(bucket,{get(target,name){const value=Reflect.get(target,name);return typeof value==='function'?(...args)=>{if(name==='get')reads.push(args);return value.apply(target,args);}:value;}});

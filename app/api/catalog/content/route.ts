@@ -29,7 +29,7 @@ export async function GET(request: Request) {
     const cacheKey=`${book.epubKey}.sambu-content.json`;
     const cachedMeta=await env.BUCKET.head(cacheKey);
     // An edited/reprocessed source gets a new immutable cache namespace.
-    const prefix=`${book.epubKey}.reader-v1.${source.etag}.${cachedMeta?.etag||'source'}`;
+    const prefix=`${book.epubKey}.reader-v2.${source.etag}.${cachedMeta?.etag||'source'}`;
     let index:ReaderIndex|null=null;
     if(paged){const object=await env.BUCKET.get(`${prefix}.index.json`);if(object)index=JSON.parse(await object.text());}
     const readParsed=async()=>{
