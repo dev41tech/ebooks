@@ -5,7 +5,7 @@ import { accessFor } from "./policy";
 export async function sessionAccess() {
   const user = await getChatGPTUser();
   const config = env as unknown as Record<string, unknown>;
-  return { user, ...accessFor(user?.email, config.SAMBU_ADMIN_EMAILS, config.SAMBU_BETA_EMAILS) };
+  return { user, ...accessFor(user?.email, config.SAMBU_ADMIN_EMAILS, config.SAMBU_BETA_EMAILS, config.SAMBU_BETA_OPEN) };
 }
 export async function requireAccess(role: "admin" | "participant") {
   const session = await sessionAccess();

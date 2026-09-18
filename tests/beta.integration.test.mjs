@@ -192,3 +192,15 @@ test('ebook deletion requires master and exact title, removes access and preserv
  assert.ok(await env.BUCKET.head('imports/direct/delete-test.epub'));
  identity.email=reader;assert.notEqual((await routes.content.GET(new Request(`https://sambu.test/api?id=${id}`))).status,200);
 });
+
+test('open beta permits a new signed-in reader to save name and read without admin access',async()=>{
+ env.SAMBU_BETA_OPEN='true';identity.email='new-beta-reader@example.test';identity.cookie='';
+ try{
+  assert.equal((await routes.profile.PATCH(payload({displayName:'Nova leitora'},'PATCH'))).status,200);
+  assert.equal((await (await routes.profile.GET()).json()).profile.displayName,'Nova leitora');
+  assert.equal((await routes.content.GET(new Request(`https://sambu.test/api?id=${publishedId}`))).status,200);
+  assert.equal((await routes.books.GET()).status,403);
+  assert.equal((await routes.master.POST(masterRequest('login'))).status,403);
+  identity.email=null;assert.equal((await routes.content.GET(new Request(`https://sambu.test/api?id=${publishedId}`))).status,401);
+ }finally{delete env.SAMBU_BETA_OPEN;}
+});
