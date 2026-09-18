@@ -20,7 +20,7 @@
     "mobile:sync": "npm run mobile:build && cap sync",
     "mobile:android": "cap open android",
     "mobile:ios": "cap open ios",
-    "test:client": "node --test tests/client-api.test.mjs"
+    "test:client": "node --test tests/client-api.test.mjs tests/reader-blocks.test.mjs"
   },
   "dependencies": {
     "@capacitor/android": "8.5.2",

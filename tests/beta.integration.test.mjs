@@ -221,3 +221,14 @@ test('named administration testers can manage books while other users and master
   identity.email=admin;assert.equal((await routes.books.GET()).status,403);
  }finally{delete env.SAMBU_ADMIN_TESTER_EMAILS;}
 });
+
+test('expanded reader profile persists optional fields privately and rejects invalid names',async()=>{
+ identity.email=reader;
+ const tasteProfile={city:'Curitiba',region:'Paraná',language:'Português',genres:'Suspense',bio:'Leio à noite.'};
+ assert.equal((await routes.profile.PATCH(payload({displayName:'Leitora',tasteProfile},'PATCH'))).status,200);
+ assert.deepEqual((await (await routes.profile.GET()).json()).profile.tasteProfile,tasteProfile);
+ assert.equal((await routes.profile.PATCH(payload({displayName:'Novo nome'},'PATCH'))).status,200);
+ assert.deepEqual((await (await routes.profile.GET()).json()).profile.tasteProfile,tasteProfile);
+ assert.equal((await routes.profile.PATCH(payload({displayName:{}},'PATCH'))).status,400);
+ identity.email='other-profile@example.test';assert.equal((await (await routes.profile.GET()).json()).profile.tasteProfile,undefined);
+});
