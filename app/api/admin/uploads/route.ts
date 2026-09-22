@@ -1,169 +1,64 @@
-// Upload direto de ebook pelo painel administrativo.
-//
-// Portado da versao Cloudflare: la o arquivo ia para o R2 via multipart de
-// env.BUCKET. Aqui o destino e o Supabase Storage, que nao expoe multipart pela
-// API REST -- entao as partes sao gravadas como objetos temporarios e unidas no
-// "complete". O protocolo visto pelo frontend continua o mesmo (init/part/
-// complete), porque o troceamento existe para manter cada requisicao pequena.
-import { requireAdmin } from "../../../auth";
-import { getObject, putObject, deleteObject } from "../../../../db/storage";
-
-const CHUNK_SIZE = 250_000;
-const MAX_FILE_SIZE = 250_000_000;
-const MAX_PARTS = Math.ceil(MAX_FILE_SIZE / CHUNK_SIZE);
-
-function safeName(value: unknown) {
-  return String(value || "ebook")
-    .replace(/[^a-zA-Z0-9._-]+/g, "-")
-    .slice(-140);
+import {requireAccess} from '../../../lib/access';
+import {bucket} from '../../../../db/storage';
+const CHUNK_SIZE=250_000,MAX_FILE_SIZE=250_000_000,MAX_PARTS=1000;
+const validId=(id:string)=>/^[a-f0-9-]{36}$/i.test(id);
+const prefix=(email:string,id:string)=>'imports/direct/'+encodeURIComponent(email.toLowerCase())+'/'+id;
+const safeName=(name:unknown)=>String(name||'ebook').replace(/[^a-zA-Z0-9._-]+/g,'-').slice(-140);
+async function boundedBody(request:Request){
+ if(!request.body)return null;
+ const reader=request.body.getReader(),parts:Uint8Array[]=[];let size=0;
+ try{while(true){const {value,done}=await reader.read();if(done)break;size+=value.byteLength;if(size>CHUNK_SIZE){await reader.cancel();return null;}parts.push(value);}}finally{reader.releaseLock();}
+ if(!size)return null;
+ return new Blob(parts as BlobPart[]);
 }
-
-function uploadPrefix(owner: string, uploadId: string) {
-  const ownerKey = owner.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 80);
-  return `direct-uploads/${ownerKey}/${uploadId}`;
-}
-
-export async function POST(request: Request) {
-  const { user, error } = await requireAdmin();
-  if (error) return error;
-
-  const body = (await request.json().catch(() => ({}))) as {
-    action?: string;
-    uploadId?: string;
-    fileName?: string;
-    contentType?: string;
-    size?: number;
-    totalParts?: number;
-    part?: number;
-    data?: string;
-  };
-
-  if (body.action === "init") {
-    const fileName = safeName(body.fileName);
-    const size = Number(body.size || 0);
-    if (!/\.(epub|pdf|txt)$/i.test(fileName))
-      return Response.json({ error: "invalid_file_type" }, { status: 400 });
-    if (!size || size > MAX_FILE_SIZE)
-      return Response.json(
-        { error: "file_too_large", maxFileSize: MAX_FILE_SIZE },
-        { status: 400 },
-      );
-    return Response.json({
-      uploadId: crypto.randomUUID(),
-      chunkSize: CHUNK_SIZE,
-      maxFileSize: MAX_FILE_SIZE,
-    });
-  }
-
-  if (body.action === "part") {
-    const uploadId = String(body.uploadId || "");
-    const part = Number(body.part);
-    if (
-      !/^[a-f0-9-]{36}$/i.test(uploadId) ||
-      !Number.isInteger(part) ||
-      part < 0 ||
-      part >= MAX_PARTS ||
-      typeof body.data !== "string"
-    )
-      return Response.json({ error: "invalid_part" }, { status: 400 });
-
-    let bytes: Uint8Array;
-    try {
-      const decoded = atob(body.data);
-      bytes = Uint8Array.from(decoded, (character) => character.charCodeAt(0));
-    } catch {
-      return Response.json({ error: "invalid_part_data" }, { status: 400 });
-    }
-    if (!bytes.byteLength || bytes.byteLength > CHUNK_SIZE)
-      return Response.json({ error: "invalid_chunk_size" }, { status: 400 });
-
-    const key = `${uploadPrefix(user.email, uploadId)}/parts/${part}`;
-    await putObject(
-      key,
-      new Blob([bytes.buffer as ArrayBuffer]),
-      "application/octet-stream",
-    );
-    return Response.json({ ok: true, part, size: bytes.byteLength });
-  }
-
-  if (body.action !== "complete")
-    return Response.json({ error: "invalid_action" }, { status: 400 });
-
-  const uploadId = String(body.uploadId || "");
-  const totalParts = Number(body.totalParts || 0);
-  const expectedSize = Number(body.size || 0);
-  const fileName = safeName(body.fileName);
-  if (
-    !/^[a-f0-9-]{36}$/i.test(uploadId) ||
-    totalParts < 1 ||
-    totalParts > MAX_PARTS ||
-    expectedSize < 1 ||
-    expectedSize > MAX_FILE_SIZE ||
-    !/\.(epub|pdf|txt)$/i.test(fileName)
-  )
-    return Response.json({ error: "invalid_upload" }, { status: 400 });
-
-  const prefix = uploadPrefix(user.email, uploadId);
-  const pedacos: ArrayBuffer[] = [];
-  let actualSize = 0;
-
-  for (let index = 0; index < totalParts; index++) {
-    const object = await getObject(`${prefix}/parts/${index}`);
-    if (!object)
-      return Response.json({ error: "missing_part", part: index }, { status: 409 });
-    const buffer = await object.arrayBuffer();
-    actualSize += buffer.byteLength;
-    pedacos.push(buffer);
-  }
-
-  if (actualSize !== expectedSize)
-    return Response.json(
-      { error: "size_mismatch", expected: expectedSize, actual: actualSize },
-      { status: 409 },
-    );
-
-  const storageKey = `${prefix}/${fileName}`;
-  await putObject(
-    storageKey,
-    new Blob(pedacos),
-    body.contentType || "application/octet-stream",
-  );
-
-  // Limpa as partes; falha aqui nao invalida o upload, que ja foi consolidado.
-  await Promise.all(
-    Array.from({ length: totalParts }, (_, index) =>
-      deleteObject(`${prefix}/parts/${index}`).catch(() => {}),
-    ),
-  );
-
-  return Response.json({
-    ok: true,
-    storageKey,
-    fileName,
-    contentType: body.contentType || "application/octet-stream",
-    fileSize: actualSize,
+export async function POST(request:Request){
+ const access=await requireAccess('admin');if(access.error)return access.error;const email=access.user!.email;
+ const b=await request.json().catch(()=>({}));const id=String(b.uploadId||'');
+ if(b.action==='init'){
+  const name=safeName(b.fileName),size=Number(b.size);
+  if(!/\.(epub|pdf)$/i.test(name))return Response.json({error:'invalid_file_type'},{status:400});
+  if(!Number.isSafeInteger(size)||size<1||size>MAX_FILE_SIZE||(/\.epub$/i.test(name)&&size>32_000_000))return Response.json({error:'file_too_large'},{status:400});
+  const uploadId=crypto.randomUUID();
+  await bucket.put(prefix(email,uploadId)+'/manifest.json',JSON.stringify({fileName:name,size,contentType:/\.pdf$/i.test(name)?'application/pdf':'application/epub+zip'}),{httpMetadata:{contentType:'application/json'},customMetadata:{owner:email}});
+  return Response.json({uploadId,chunkSize:CHUNK_SIZE,maxFileSize:MAX_FILE_SIZE});
+ }
+ if(!validId(id))return Response.json({error:'invalid_upload'},{status:400});
+ const root=prefix(email,id),manifest=await bucket.get(root+'/manifest.json');
+ if(!manifest)return Response.json({error:'upload_not_found'},{status:404});
+ const meta=JSON.parse(await manifest.text()) as {fileName:string;size:number;contentType:string};
+ const total=Math.ceil(meta.size/CHUNK_SIZE);
+ if(b.action==='part'){
+  const part=Number(b.part);
+  if(!Number.isInteger(part)||part<0||part>=total||typeof b.data!=='string'||b.data.length>340000)return Response.json({error:'invalid_part'},{status:400});
+  let bytes:Uint8Array;try{bytes=Uint8Array.from(atob(b.data),c=>c.charCodeAt(0));}catch{return Response.json({error:'invalid_part_data'},{status:400});}
+  if(bytes.length!==Math.min(CHUNK_SIZE,meta.size-part*CHUNK_SIZE))return Response.json({error:'invalid_chunk_size'},{status:400});
+  await bucket.put(root+'/parts/'+part,bytes);return Response.json({ok:true,part});
+ }
+ if(b.action!=='complete'||b.totalParts!==total||total>MAX_PARTS||b.size!==meta.size)return Response.json({error:'invalid_upload'},{status:400});
+ const key=root+'/'+meta.fileName;
+ const existing=await bucket.head(key);
+ if(!existing){
+  // Sequential source reads and streaming upload keep a 250 MB PDF out of RAM.
+  let next=0;
+  const stream=new ReadableStream<Uint8Array>({
+   async pull(controller){
+    if(next===total){controller.close();return;}
+    try{const i=next++;const object=await bucket.get(root+'/parts/'+i);if(!object)throw new Error('missing_part');const bytes=new Uint8Array(await object.arrayBuffer());if(bytes.length!==Math.min(CHUNK_SIZE,meta.size-i*CHUNK_SIZE))throw new Error('size_mismatch');controller.enqueue(bytes);}catch(e){controller.error(e);}
+   }
   });
+  await bucket.put(key,stream,{size:meta.size,httpMetadata:{contentType:meta.contentType},customMetadata:{owner:email}});
+ }else if(existing.size!==meta.size||existing.customMetadata.owner!==email)return Response.json({error:'upload_conflict'},{status:409});
+ for(let i=0;i<total;i++)await bucket.delete(root+'/parts/'+i).catch(()=>{});
+ return Response.json({ok:true,storageKey:key,fileName:meta.fileName,contentType:meta.contentType,fileSize:meta.size});
 }
-
-export async function PUT(request: Request) {
-  const { user, error } = await requireAdmin();
-  if (error) return error;
-
-  const url = new URL(request.url);
-  const uploadId = url.searchParams.get("uploadId") || "";
-  const part = Number(url.searchParams.get("part"));
-  const contentLength = Number(request.headers.get("content-length") || 0);
-  if (
-    !/^[a-f0-9-]{36}$/i.test(uploadId) ||
-    !Number.isInteger(part) ||
-    part < 0 ||
-    part >= MAX_PARTS
-  )
-    return Response.json({ error: "invalid_part" }, { status: 400 });
-  if (!contentLength || contentLength > CHUNK_SIZE)
-    return Response.json({ error: "invalid_chunk_size" }, { status: 400 });
-
-  const key = `${uploadPrefix(user.email, uploadId)}/parts/${part}`;
-  await putObject(key, await request.blob(), "application/octet-stream");
-  return Response.json({ ok: true, part });
+export async function PUT(request:Request){
+ const access=await requireAccess('admin');if(access.error)return access.error;
+ const u=new URL(request.url),id=u.searchParams.get('uploadId')||'',part=Number(u.searchParams.get('part'));
+ if(!validId(id)||!Number.isInteger(part)||part<0||part>=MAX_PARTS)return Response.json({error:'invalid_part'},{status:400});
+ const root=prefix(access.user!.email,id),object=await bucket.get(root+'/manifest.json');
+ if(!object)return Response.json({error:'upload_not_found'},{status:404});
+ const meta=JSON.parse(await object.text()) as {size:number};
+ const body=await boundedBody(request);
+ if(!body||part>=Math.ceil(meta.size/CHUNK_SIZE)||body.size!==Math.min(CHUNK_SIZE,meta.size-part*CHUNK_SIZE))return Response.json({error:'invalid_chunk_size'},{status:400});
+ await bucket.put(root+'/parts/'+part,body);return Response.json({ok:true,part,size:body.size});
 }

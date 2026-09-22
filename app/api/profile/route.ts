@@ -1,3 +1,4 @@
+import { cleanReaderProfile } from "../../lib/reader-profile";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { profiles } from "../../../db/schema";
@@ -14,9 +15,12 @@ export async function GET() {
 export async function PATCH(request: Request) {
   const user = await getUser();
   if (!user) return Response.json({ error: "sign_in_required" }, { status: 401 });
-  const body = (await request.json()) as { displayName?: string; tasteProfile?: unknown };
+  const body = await request.json().catch(()=>null) as { displayName?: unknown; tasteProfile?: unknown }|null;
+  if(!body || typeof body.displayName!=="string" || !body.displayName.trim())return Response.json({error:"invalid_profile",message:"Preencha seu nome para salvar o cadastro."},{status:400});
   const displayName = body.displayName?.trim().slice(0, 80) || user.displayName || user.email.split("@")[0];
   const db = await getDb();
-  await db.insert(profiles).values({ id: crypto.randomUUID(), email: user.email, displayName, role: "reader", tasteProfile: body.tasteProfile ?? null, createdAt: new Date().toISOString() }).onConflictDoUpdate({ target: profiles.email, set: { displayName, tasteProfile: body.tasteProfile ?? null } });
-  return Response.json({ ok: true, profile: { email: user.email, displayName, tasteProfile: body.tasteProfile ?? null } });
+  const [existing]=await db.select().from(profiles).where(eq(profiles.email,user.email)).limit(1);
+  const tasteProfile=body.tasteProfile===undefined?existing?.tasteProfile??null:cleanReaderProfile(body.tasteProfile);
+  await db.insert(profiles).values({ id: crypto.randomUUID(), email: user.email, displayName, role: "reader", tasteProfile: tasteProfile, createdAt: new Date().toISOString() }).onConflictDoUpdate({ target: profiles.email, set: { displayName, tasteProfile: tasteProfile } });
+  return Response.json({ ok: true, profile: { email: user.email, displayName, tasteProfile: tasteProfile } });
 }

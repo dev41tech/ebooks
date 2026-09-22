@@ -1,5 +1,7 @@
 import {
   boolean,
+  bigint,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -73,6 +75,8 @@ export const readingProgress = pgTable(
     bookId: text("book_id").notNull(),
     chapter: integer("chapter").notNull().default(0),
     progress: integer("progress").notNull().default(0),
+    position: integer("position").notNull().default(0),
+    revision: integer("revision").notNull().default(0),
     updatedAt: text("updated_at").notNull(),
   },
   (t) => [uniqueIndex("progress_owner_book_idx").on(t.userEmail, t.bookId)],
@@ -142,6 +146,7 @@ export const reviews = pgTable(
     userEmail: text("user_email").notNull(),
     bookId: text("book_id").notNull(),
     rating: integer("rating").notNull(),
+    textRating: integer("text_rating"),
     comment: text("comment"),
     status: text("status").notNull().default("published"),
     createdAt: text("created_at").notNull(),
@@ -296,3 +301,44 @@ export const stagingBooks = pgTable(
     ),
   ],
 );
+
+export const masterCredentials = pgTable("master_credentials", {
+  id: text("id").primaryKey(),
+  salt: text("salt").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: bigint("created_at", {mode:"number"}).notNull(),
+});
+export const masterSessions = pgTable("master_sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  email: text("email").notNull(),
+  expiresAt: bigint("expires_at", {mode:"number"}).notNull(),
+});
+export const masterAttempts = pgTable("master_attempts", {
+  email: text("email").primaryKey(),
+  attempts: integer("attempts").notNull(),
+  windowStart: bigint("window_start", {mode:"number"}).notNull(),
+});
+
+export const discoverySearches = pgTable("discovery_searches", {
+  id: text("id").primaryKey(),
+  userEmail: text("user_email").notNull(),
+  query: text("query").notNull(),
+  createdAt: bigint("created_at", {mode:"number"}).notNull(),
+});
+
+export const betaFeedback = pgTable("beta_feedback", {
+  id: text("id").primaryKey(),
+  userEmail: text("user_email").notNull(),
+  bookId: text("book_id").notNull(),
+  category: text("category").notNull(),
+  message: text("message").notNull(),
+  chapterLabel: text("chapter_label"),
+  position: integer("position").notNull().default(0),
+  appVersion: text("app_version").notNull(),
+  device: text("device").notNull(),
+  status: text("status").notNull().default("open"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, t=>[index("feedback_owner_date_idx").on(t.userEmail,t.createdAt),index("feedback_date_idx").on(t.createdAt)]);
+
+export const storageMetadata = pgTable("storage_metadata", {key:text("key").primaryKey(),metadata:jsonb("metadata").notNull(),updatedAt:text("updated_at").notNull()});
