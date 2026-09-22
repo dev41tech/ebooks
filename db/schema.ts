@@ -1,24 +1,23 @@
 import {
-  boolean,
   integer,
-  jsonb,
-  pgTable,
+  index,
+  sqliteTable,
   text,
   uniqueIndex,
-} from "drizzle-orm/pg-core";
-export const profiles = pgTable(
+} from "drizzle-orm/sqlite-core";
+export const profiles = sqliteTable(
   "profiles",
   {
     id: text("id").primaryKey(),
     email: text("email").notNull(),
     displayName: text("display_name"),
     role: text("role").notNull().default("reader"),
-    tasteProfile: jsonb("taste_profile"),
+    tasteProfile: text("taste_profile", { mode: "json" }),
     createdAt: text("created_at").notNull(),
   },
   (t) => [uniqueIndex("profiles_email_idx").on(t.email)],
 );
-export const books = pgTable(
+export const books = sqliteTable(
   "books",
   {
     id: text("id").primaryKey(),
@@ -28,21 +27,16 @@ export const books = pgTable(
     author: text("author").notNull(),
     authorId: text("author_id"),
     genre: text("genre").notNull(),
-    // Classificacao hierarquica vinda do Sambu Ebooks. `genre` continua sendo o
-    // grupo (ex.: "Saude e bem-estar") para o filtro do catalogo; estas duas
-    // guardam o caminho completo e as secundarias, que alimentam a busca.
-    categoryMain: text("category_main"),
-    categoriesSecondary: jsonb("categories_secondary"),
     language: text("language").notNull().default("pt-BR"),
     isbn: text("isbn"),
     collection: text("collection"),
-    featured: boolean("featured").notNull().default(false),
+    featured: integer("featured", { mode: "boolean" }).notNull().default(false),
     freeChapters: integer("free_chapters").notNull().default(1),
     format: text("format"),
     ageRating: text("age_rating"),
     description: text("description").notNull(),
     priceCents: integer("price_cents"),
-    subscribersOnly: boolean("subscribers_only").default(
+    subscribersOnly: integer("subscribers_only", { mode: "boolean" }).default(
       false,
     ),
     coverKey: text("cover_key"),
@@ -55,7 +49,7 @@ export const books = pgTable(
   },
   (t) => [uniqueIndex("books_slug_idx").on(t.slug)],
 );
-export const chapters = pgTable("chapters", {
+export const chapters = sqliteTable("chapters", {
   id: text("id").primaryKey(),
   bookId: text("book_id")
     .notNull()
@@ -65,7 +59,7 @@ export const chapters = pgTable("chapters", {
   content: text("content").notNull(),
   createdAt: text("created_at").notNull(),
 });
-export const readingProgress = pgTable(
+export const readingProgress = sqliteTable(
   "reading_progress",
   {
     id: text("id").primaryKey(),
@@ -73,11 +67,13 @@ export const readingProgress = pgTable(
     bookId: text("book_id").notNull(),
     chapter: integer("chapter").notNull().default(0),
     progress: integer("progress").notNull().default(0),
+    position: integer("position").notNull().default(0),
+    revision: integer("revision").notNull().default(0),
     updatedAt: text("updated_at").notNull(),
   },
   (t) => [uniqueIndex("progress_owner_book_idx").on(t.userEmail, t.bookId)],
 );
-export const bookmarks = pgTable(
+export const bookmarks = sqliteTable(
   "bookmarks",
   {
     id: text("id").primaryKey(),
@@ -96,7 +92,7 @@ export const bookmarks = pgTable(
     ),
   ],
 );
-export const favorites = pgTable(
+export const favorites = sqliteTable(
   "favorites",
   {
     id: text("id").primaryKey(),
@@ -106,17 +102,17 @@ export const favorites = pgTable(
   },
   (t) => [uniqueIndex("favorites_owner_book_idx").on(t.userEmail, t.bookId)],
 );
-export const analyticsEvents = pgTable("analytics_events", {
+export const analyticsEvents = sqliteTable("analytics_events", {
   id: text("id").primaryKey(),
   userEmail: text("user_email"),
   anonymousId: text("anonymous_id"),
   event: text("event").notNull(),
   bookId: text("book_id"),
   chapterId: text("chapter_id"),
-  metadata: jsonb("metadata"),
+  metadata: text("metadata", { mode: "json" }),
   createdAt: text("created_at").notNull(),
-});
-export const subscriptions = pgTable(
+}, t=>[index("analytics_event_date_idx").on(t.event,t.createdAt),index("analytics_book_owner_event_idx").on(t.bookId,t.userEmail,t.event,t.createdAt)]);
+export const subscriptions = sqliteTable(
   "subscriptions",
   {
     id: text("id").primaryKey(),
@@ -127,7 +123,7 @@ export const subscriptions = pgTable(
     providerCustomerId: text("provider_customer_id"),
     providerSubscriptionId: text("provider_subscription_id"),
     currentPeriodEnd: text("current_period_end"),
-    cancelAtPeriodEnd: boolean("cancel_at_period_end")
+    cancelAtPeriodEnd: integer("cancel_at_period_end", { mode: "boolean" })
       .notNull()
       .default(false),
     createdAt: text("created_at").notNull(),
@@ -135,13 +131,14 @@ export const subscriptions = pgTable(
   },
   (t) => [uniqueIndex("subscription_owner_idx").on(t.userEmail)],
 );
-export const reviews = pgTable(
+export const reviews = sqliteTable(
   "reviews",
   {
     id: text("id").primaryKey(),
     userEmail: text("user_email").notNull(),
     bookId: text("book_id").notNull(),
     rating: integer("rating").notNull(),
+    textRating: integer("text_rating"),
     comment: text("comment"),
     status: text("status").notNull().default("published"),
     createdAt: text("created_at").notNull(),
@@ -149,7 +146,7 @@ export const reviews = pgTable(
   },
   (t) => [uniqueIndex("reviews_owner_book_idx").on(t.userEmail, t.bookId)],
 );
-export const readingSessions = pgTable("reading_sessions", {
+export const readingSessions = sqliteTable("reading_sessions", {
   id: text("id").primaryKey(),
   userEmail: text("user_email").notNull(),
   bookId: text("book_id").notNull(),
@@ -158,7 +155,7 @@ export const readingSessions = pgTable("reading_sessions", {
   startedAt: text("started_at").notNull(),
   endedAt: text("ended_at"),
 });
-export const notifications = pgTable("notifications", {
+export const notifications = sqliteTable("notifications", {
   id: text("id").primaryKey(),
   userEmail: text("user_email").notNull(),
   type: text("type").notNull(),
@@ -167,7 +164,7 @@ export const notifications = pgTable("notifications", {
   readAt: text("read_at"),
   createdAt: text("created_at").notNull(),
 });
-export const mediaAssets = pgTable(
+export const mediaAssets = sqliteTable(
   "media_assets",
   {
     id: text("id").primaryKey(),
@@ -183,64 +180,7 @@ export const mediaAssets = pgTable(
   },
   (t) => [uniqueIndex("media_storage_key_idx").on(t.storageKey)],
 );
-// Produção de ebooks por IA (telas portadas do Sambu Ebooks). Guarda o pedido do
-// autor e o rascunho resultante. A geração em si ainda não roda aqui — o registro
-// nasce em "rascunho" e é preenchido quando a etapa de geração for ligada.
-export const ebookDrafts = pgTable("ebook_drafts", {
-  id: text("id").primaryKey(),
-  ownerEmail: text("owner_email").notNull(),
-  origin: text("origin").notNull().default("ia"),
-  category: text("category").notNull().default("geral"),
-  // Classificacao hierarquica; acompanha o rascunho para chegar intacta ao
-  // livro publicado, onde alimenta a busca do catalogo.
-  categoryMain: text("category_main"),
-  categoriesSecondary: jsonb("categories_secondary"),
-  title: text("title").notNull().default(""),
-  titleMode: text("title_mode").notNull().default("ai"),
-  subtitle: text("subtitle").notNull().default(""),
-  theme: text("theme").notNull(),
-  audience: text("audience").notNull().default(""),
-  tone: text("tone").notNull().default("Motivador"),
-  language: text("language").notNull().default("Português (Brasil)"),
-  pageCount: integer("page_count").notNull().default(20),
-  wordsPerPage: integer("words_per_page").notNull().default(250),
-  authorName: text("author_name").notNull().default(""),
-  authorBio: text("author_bio").notNull().default(""),
-  extraInstructions: text("extra_instructions").notNull().default(""),
-  referenceMaterial: text("reference_material").notNull().default(""),
-  referenceSource: text("reference_source").notNull().default(""),
-  coverSource: text("cover_source").notNull().default("none"),
-  coverSuggestion: text("cover_suggestion").notNull().default(""),
-  coverKey: text("cover_key"),
-  sourceFileName: text("source_file_name"),
-  sourceStorageKey: text("source_storage_key"),
-  intro: text("intro").notNull().default(""),
-  conclusion: text("conclusion").notNull().default(""),
-  marketing: jsonb("marketing"),
-  status: text("status").notNull().default("rascunho"),
-  statusMessage: text("status_message").notNull().default(""),
-  publishedBookId: text("published_book_id"),
-  createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull(),
-});
-
-export const ebookDraftChapters = pgTable(
-  "ebook_draft_chapters",
-  {
-    id: text("id").primaryKey(),
-    draftId: text("draft_id")
-      .notNull()
-      .references(() => ebookDrafts.id),
-    position: integer("position").notNull(),
-    title: text("title").notNull(),
-    summary: text("summary").notNull().default(""),
-    content: text("content").notNull().default(""),
-    createdAt: text("created_at").notNull(),
-  },
-  (t) => [uniqueIndex("draft_chapter_position_idx").on(t.draftId, t.position)],
-);
-
-export const importBatches = pgTable("import_batches", {
+export const importBatches = sqliteTable("import_batches", {
   id: text("id").primaryKey(),
   ownerEmail: text("owner_email").notNull(),
   name: text("name").notNull(),
@@ -253,7 +193,7 @@ export const importBatches = pgTable("import_batches", {
   createdAt: text("created_at").notNull(),
   expiresAt: text("expires_at"),
 });
-export const stagingBooks = pgTable(
+export const stagingBooks = sqliteTable(
   "staging_books",
   {
     id: text("id").primaryKey(),
@@ -275,15 +215,15 @@ export const stagingBooks = pgTable(
     fileSize: integer("file_size"),
     coverKey: text("cover_key"),
     status: text("status").notNull().default("ready"),
-    rightsConfirmed: boolean("rights_confirmed")
+    rightsConfirmed: integer("rights_confirmed", { mode: "boolean" })
       .notNull()
       .default(false),
     reviewedBy: text("reviewed_by"),
     reviewedAt: text("reviewed_at"),
     correctionNote: text("correction_note"),
     publishedBookId: text("published_book_id"),
-    validationErrors: jsonb("validation_errors"),
-    isTest: boolean("is_test").notNull().default(true),
+    validationErrors: text("validation_errors", { mode: "json" }),
+    isTest: integer("is_test", { mode: "boolean" }).notNull().default(true),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at"),
     expiresAt: text("expires_at"),
@@ -296,3 +236,42 @@ export const stagingBooks = pgTable(
     ),
   ],
 );
+
+export const masterCredentials = sqliteTable("master_credentials", {
+  id: text("id").primaryKey(),
+  salt: text("salt").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+export const masterSessions = sqliteTable("master_sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  email: text("email").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+});
+export const masterAttempts = sqliteTable("master_attempts", {
+  email: text("email").primaryKey(),
+  attempts: integer("attempts").notNull(),
+  windowStart: integer("window_start").notNull(),
+});
+
+export const discoverySearches = sqliteTable("discovery_searches", {
+  id: text("id").primaryKey(),
+  userEmail: text("user_email").notNull(),
+  query: text("query").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const betaFeedback = sqliteTable("beta_feedback", {
+  id: text("id").primaryKey(),
+  userEmail: text("user_email").notNull(),
+  bookId: text("book_id").notNull(),
+  category: text("category").notNull(),
+  message: text("message").notNull(),
+  chapterLabel: text("chapter_label"),
+  position: integer("position").notNull().default(0),
+  appVersion: text("app_version").notNull(),
+  device: text("device").notNull(),
+  status: text("status").notNull().default("open"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, t=>[index("feedback_owner_date_idx").on(t.userEmail,t.createdAt),index("feedback_date_idx").on(t.createdAt)]);

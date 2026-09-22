@@ -1,16 +1,19 @@
+import { requireAccess } from "../../../lib/access";
+import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { books } from "../../../../db/schema";
-import { getObject } from "../../../../db/storage";
 
 export async function GET(request: Request) {
+  const access = await requireAccess("participant");
+  if (access.error) return access.error;
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return Response.json({ error: "book_required" }, { status: 400 });
   const db = await getDb();
   const [book] = await db.select().from(books).where(eq(books.id, id)).limit(1);
   if (!book || book.status !== "published" || !book.epubKey)
     return Response.json({ error: "content_not_found" }, { status: 404 });
-  const object = await getObject(book.epubKey);
+  const object = await env.BUCKET.get(book.epubKey);
   if (!object)
     return Response.json({ error: "file_not_found" }, { status: 404 });
   const isPdf = book.format?.toUpperCase().includes("PDF");

@@ -1,143 +1,64 @@
+import { requireAccess } from "../../../lib/access";
+import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
-import { strFromU8, unzipSync } from "fflate";
+import { extractEpub } from "../../../lib/epub";
 import { getDb } from "../../../../db";
 import { books } from "../../../../db/schema";
-import { getObject } from "../../../../db/storage";
-
-type ZipFiles = Record<string, Uint8Array>;
-
-function decodeEntities(value: string) {
-  const named: Record<string, string> = {
-    amp: "&",
-    apos: "'",
-    gt: ">",
-    lt: "<",
-    nbsp: " ",
-    quot: '"',
-  };
-  return value
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) =>
-      String.fromCodePoint(parseInt(n, 16)),
-    )
-    .replace(/&#([0-9]+);/g, (_, n) => String.fromCodePoint(parseInt(n, 10)))
-    .replace(/&([a-z]+);/gi, (all, name) => named[name.toLowerCase()] ?? all);
-}
-
-function textOnly(html: string) {
-  return decodeEntities(
-    html
-      .replace(/<script[\s\S]*?<\/script>/gi, "")
-      .replace(/<style[\s\S]*?<\/style>/gi, "")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/[ \t]+/g, " ")
-      .replace(/\s*\n\s*/g, "\n")
-      .trim(),
-  );
-}
-
-function resolvePath(baseFile: string, href: string) {
-  const parts =
-    `${baseFile.slice(0, baseFile.lastIndexOf("/") + 1)}${href.split("#")[0]}`.split(
-      "/",
-    );
-  const resolved: string[] = [];
-  for (const part of parts) {
-    if (!part || part === ".") continue;
-    if (part === "..") resolved.pop();
-    else resolved.push(part);
-  }
-  return resolved.join("/");
-}
-
-function extractEpub(bytes: Uint8Array) {
-  const files: ZipFiles = unzipSync(bytes);
-  const container = files["META-INF/container.xml"]
-    ? strFromU8(files["META-INF/container.xml"])
-    : "";
-  const opfPath =
-    container.match(/full-path=["']([^"']+)["']/i)?.[1] ||
-    Object.keys(files).find((name) => name.toLowerCase().endsWith(".opf"));
-  if (!opfPath || !files[opfPath]) throw new Error("invalid_epub");
-  const opf = strFromU8(files[opfPath]);
-  const manifest = new Map<string, string>();
-  for (const match of opf.matchAll(/<item\b([^>]+)>?/gi)) {
-    const attrs = match[1];
-    const id = attrs.match(/\bid=["']([^"']+)["']/i)?.[1];
-    const href = attrs.match(/\bhref=["']([^"']+)["']/i)?.[1];
-    const media = attrs.match(/\bmedia-type=["']([^"']+)["']/i)?.[1] || "";
-    if (id && href && /xhtml|html/i.test(media)) manifest.set(id, href);
-  }
-  const spine = [
-    ...opf.matchAll(/<itemref\b[^>]*\bidref=["']([^"']+)["'][^>]*\/?\s*>/gi),
-  ].map((match) => match[1]);
-  const ordered = spine
-    .map((id) => manifest.get(id))
-    .filter((href): href is string => Boolean(href));
-  const hrefs = ordered.length ? ordered : [...manifest.values()];
-  const chapters = [];
-  for (const href of hrefs.slice(0, 250)) {
-    const path = resolvePath(opfPath, href);
-    if (
-      !files[path] ||
-      /(?:cover|title[_-]?page|nav)\.(?:x?html?)$/i.test(path)
-    )
-      continue;
-    const html = strFromU8(files[path]);
-    const title: string =
-      textOnly(html.match(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/i)?.[1] || "") ||
-      textOnly(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "") ||
-      `Capítulo ${chapters.length + 1}`;
-    const body = [
-      ...html.matchAll(
-        /<(?:p|blockquote|li)[^>]*>([\s\S]*?)<\/(?:p|blockquote|li)>/gi,
-      ),
-    ]
-      .map((match) => textOnly(match[1]))
-      .filter((text) => text.length > 1);
-    if (!body.length) {
-      const fallback = textOnly(
-        html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] || "",
-      );
-      if (fallback) body.push(...fallback.split(/\n{2,}/).filter(Boolean));
-    }
-    if (body.length)
-      chapters.push({
-        id: `${path}-${chapters.length}`,
-        number: chapters.length + 1,
-        title,
-        minutes: Math.max(
-          1,
-          Math.ceil(body.join(" ").split(/\s+/).length / 220),
-        ),
-        free: chapters.length === 0,
-        body,
-      });
-  }
-  if (!chapters.length) throw new Error("empty_epub");
-  return chapters;
-}
+import { chapterForPosition, packReaderContent, type ReaderIndex } from "../../../lib/reader-content";
 
 export async function GET(request: Request) {
-  const id = new URL(request.url).searchParams.get("id");
+  const access = await requireAccess("participant");
+  if (access.error) return access.error;
+  const params = new URL(request.url).searchParams;
+  const id = params.get("id");
   if (!id) return Response.json({ error: "book_required" }, { status: 400 });
+  const paged=params.has('chapter')||params.has('position');
+  const value=params.get('chapter')??params.get('position');
+  if(paged&&(!/^\d+$/.test(value||'')||!Number.isSafeInteger(Number(value))||(params.has('chapter')&&params.has('position'))))
+    return Response.json({error:'invalid_chapter'},{status:400});
   const db = await getDb();
   const [book] = await db.select().from(books).where(eq(books.id, id)).limit(1);
   if (!book || book.status !== "published" || !book.epubKey)
     return Response.json({ error: "content_not_found" }, { status: 404 });
-  const object = await getObject(book.epubKey);
-  if (!object)
+  const source = await env.BUCKET.head(book.epubKey);
+  if (!source)
     return Response.json({ error: "file_not_found" }, { status: 404 });
   if (book.format === "PDF")
     return Response.json({ error: "pdf_requires_viewer" }, { status: 415 });
   try {
-    const chapters = extractEpub(
-      new Uint8Array(await object.arrayBuffer()),
-    ).map((chapter, index) => ({
+    const cacheKey=`${book.epubKey}.sambu-content.json`;
+    const cachedMeta=await env.BUCKET.head(cacheKey);
+    // An edited/reprocessed source gets a new immutable cache namespace.
+    const prefix=`${book.epubKey}.reader-v2.${source.etag}.${cachedMeta?.etag||'source'}`;
+    let index:ReaderIndex|null=null;
+    if(paged){const object=await env.BUCKET.get(`${prefix}.index.json`);if(object)index=JSON.parse(await object.text());}
+    const readParsed=async()=>{
+      const cached=await env.BUCKET.get(cacheKey);
+      if(cached)return JSON.parse(await cached.text());
+      const original=await env.BUCKET.get(book.epubKey!);
+      if(!original)throw new Error('file_not_found');
+      return extractEpub(new Uint8Array(await original.arrayBuffer()));
+    };
+    if(paged){
+      if(!index){
+        const packed=packReaderContent(await readParsed());index=packed.index;
+        // Publish the index last, so another request never sees a partial cache.
+        await env.BUCKET.put(`${prefix}.chapters`,packed.bytes);
+        await env.BUCKET.put(`${prefix}.index.json`,JSON.stringify(index),{httpMetadata:{contentType:'application/json'}});
+      }
+      const entry=params.has('chapter')?index.chapters[Number(value)]:chapterForPosition(index,Number(value));
+      if(!entry)return Response.json({error:'chapter_not_found'},{status:404});
+      const content=await env.BUCKET.get(`${prefix}.chapters`,{range:{offset:entry.offset,length:entry.length}});
+      if(!content)throw new Error('chapter_cache_missing');
+      return Response.json({reader:{chapter:JSON.parse(await content.text()),chapterCount:index.chapters.length,totalParagraphs:index.totalParagraphs}},{headers:{'Cache-Control':'private, no-store'}});
+    }
+    // Compatibility for clients already open before chapter loading was added.
+    const parsed = await readParsed();
+    const chapters = parsed.map((chapter: { body: string[] }, index: number) => ({
       ...chapter,
       free: index < (book.freeChapters || 1),
     }));
-    return Response.json({ chapters });
+    return Response.json({ chapters },{headers:{'Cache-Control':'private, no-store'}});
   } catch {
     return Response.json({ error: "invalid_epub" }, { status: 422 });
   }

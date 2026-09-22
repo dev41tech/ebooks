@@ -1,23 +1,13 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema";
 
-let client: ReturnType<typeof postgres> | null = null;
-let database: ReturnType<typeof drizzle<typeof schema>> | null = null;
-
 export async function getDb() {
-  if (database) return database;
-
-  const url = process.env.DATABASE_URL;
-  if (!url) {
+  const { env } = await import("cloudflare:workers");
+  if (!env.DB) {
     throw new Error(
-      "DATABASE_URL nao definida. Use a connection string do Supabase (Connection Pooling, modo transaction, porta 6543).",
+      "Cloudflare D1 binding `DB` is unavailable. Set the `d1` field in .openai/hosting.json to `DB` or let your control plane inject the real binding values before using the database."
     );
   }
 
-  // `prepare: false` e obrigatorio com o pooler do Supabase em modo transaction:
-  // prepared statements nao sobrevivem entre conexoes reaproveitadas.
-  client = postgres(url, { prepare: false });
-  database = drizzle(client, { schema });
-  return database;
+  return drizzle(env.DB, { schema });
 }

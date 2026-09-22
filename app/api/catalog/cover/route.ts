@@ -1,8 +1,9 @@
+import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
-import { strFromU8, unzipSync } from "fflate";
+import { strFromU8 } from "fflate";
+import { safeUnzip } from "../../../lib/epub";
 import { getDb } from "../../../../db";
 import { books } from "../../../../db/schema";
-import { getObject } from "../../../../db/storage";
 
 function mediaType(path: string) {
   const extension = path.toLowerCase().split(".").pop();
@@ -28,7 +29,7 @@ function resolvePath(baseFile: string, href: string) {
 }
 
 function extractCover(bytes: Uint8Array) {
-  const files = unzipSync(bytes);
+  const files = safeUnzip(bytes);
   const container = files["META-INF/container.xml"]
     ? strFromU8(files["META-INF/container.xml"])
     : "";
@@ -77,26 +78,30 @@ export async function GET(request: Request) {
     return new Response(null, { status: 404 });
 
   if (book.coverKey) {
-    const cover = await getObject(book.coverKey);
+    const cover = await env.BUCKET.get(book.coverKey);
     if (cover)
       return new Response(cover.body, {
         headers: {
-          "content-type": cover.contentType || "image/jpeg",
-          "cache-control": "public, max-age=86400",
+          "content-type": cover.httpMetadata?.contentType || "image/jpeg",
+          "cache-control": "public, max-age=300",
+          "content-security-policy": "default-src 'none'; sandbox",
+          "x-content-type-options": "nosniff",
         },
       });
   }
   if (!book.epubKey || book.format?.toUpperCase().includes("PDF"))
     return new Response(null, { status: 404 });
-  const ebook = await getObject(book.epubKey);
+  const ebook = await env.BUCKET.get(book.epubKey);
   if (!ebook) return new Response(null, { status: 404 });
   try {
     const cover = extractCover(new Uint8Array(await ebook.arrayBuffer()));
     if (!cover) return new Response(null, { status: 404 });
-    return new Response(cover.bytes.buffer as ArrayBuffer, {
+    return new Response(new Uint8Array(cover.bytes).buffer, {
       headers: {
         "content-type": cover.type,
-        "cache-control": "public, max-age=86400",
+        "cache-control": "public, max-age=300",
+          "content-security-policy": "default-src 'none'; sandbox",
+          "x-content-type-options": "nosniff",
       },
     });
   } catch {

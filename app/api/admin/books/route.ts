@@ -1,20 +1,22 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, ne } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { books } from "../../../../db/schema";
-import { requireAdmin } from "../../../auth";
+import { requireAccess } from "../../../lib/access";
 
 export async function GET() {
-  const { user, error } = await requireAdmin();
-  if (error) return error;
+  const access = await requireAccess("admin");
+  if (access.error) return access.error;
+  const user = access.user!;
   const db = await getDb();
   return Response.json({
-    books: await db.select().from(books).orderBy(desc(books.createdAt)),
+    books: await db.select().from(books).where(ne(books.status, "deleted")).orderBy(desc(books.createdAt)),
   });
 }
 
 export async function POST(request: Request) {
-  const { user, error } = await requireAdmin();
-  if (error) return error;
+  const access = await requireAccess("admin");
+  if (access.error) return access.error;
+  const user = access.user!;
   const body = (await request.json()) as Record<string, unknown>;
   const title = String(body.title || "")
     .trim()
@@ -59,7 +61,7 @@ export async function POST(request: Request) {
     description,
     priceCents: Math.max(0, Math.round(Number(body.price || 0) * 100)),
     subscribersOnly: Boolean(body.subscribersOnly),
-    status: String(body.status || "draft"),
+    status: "draft",
     createdAt: now,
     updatedAt: now,
   };
@@ -69,8 +71,9 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const { user, error } = await requireAdmin();
-  if (error) return error;
+  const access = await requireAccess("admin");
+  if (access.error) return access.error;
+  const user = access.user!;
   const body = (await request.json()) as Record<string, unknown>;
   const id = String(body.id || "");
   const status = String(body.status || "draft");
@@ -80,6 +83,9 @@ export async function PATCH(request: Request) {
   )
     return Response.json({ error: "invalid_payload" }, { status: 400 });
   const db = await getDb();
+  const [current] = await db.select().from(books).where(eq(books.id, id)).limit(1);
+  if (!current || current.status === "deleted") return Response.json({ error: "not_found" }, { status: 404 });
+  if (status === "published" && current.status !== "published" && !current.publishedAt) return Response.json({ error: "review_required" }, { status: 409 });
   const now = new Date().toISOString();
   await db
     .update(books)
@@ -124,9 +130,24 @@ export async function PATCH(request: Request) {
           ? undefined
           : Boolean(body.subscribersOnly),
       status,
-      publishedAt: status === "published" ? now : null,
+      publishedAt: current.publishedAt,
       updatedAt: now,
     })
     .where(eq(books.id, id));
   return Response.json({ ok: true });
+}
+
+// Logical deletion preserves imported source files and reading history.
+export async function DELETE(request: Request) {
+  const access = await requireAccess("admin");
+  if (access.error) return access.error;
+  const body = await request.json().catch(() => null) as {id?:unknown;confirmTitle?:unknown}|null;
+  if (!body || typeof body.id !== "string" || typeof body.confirmTitle !== "string")
+    return Response.json({error:"invalid_payload"},{status:400});
+  const db=await getDb();
+  const [current]=await db.select().from(books).where(eq(books.id,body.id)).limit(1);
+  if(!current || current.status==="deleted")return Response.json({error:"not_found"},{status:404});
+  if(body.confirmTitle!==current.title)return Response.json({error:"title_confirmation_required"},{status:400});
+  await db.update(books).set({status:"deleted",updatedAt:new Date().toISOString()}).where(eq(books.id,current.id));
+  return Response.json({ok:true});
 }

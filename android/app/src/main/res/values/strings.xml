@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Sambu</string>
+    <string name="title_activity_main">Sambu</string>
+    <string name="package_name">cloud.tech41.sambu</string>
+    <string name="custom_url_scheme">cloud.tech41.sambu</string>
+</resources>
