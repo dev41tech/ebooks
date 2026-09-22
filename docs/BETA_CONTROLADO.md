@@ -23,7 +23,7 @@ A coleta de abertura/falhas começa nesta atualização. Não foi criado histór
 - Falhas totalmente offline podem não ser registradas. Não há rastreamento de tela, conteúdo digitado ou agente externo de analytics.
 - Progresso baixo não comprova desinteresse. Compare com o relato explícito e as notas.
 
-## Ciclo sugerido de 14 dias
+## Ciclo sugerido de um mês
 
 1. Selecionar 10 a 20 leitores e um acervo pequeno já revisado.
 2. Pedir cadastro, abertura de livro, avanço de capítulo e retomada após fechar o navegador.

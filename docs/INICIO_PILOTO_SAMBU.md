@@ -12,7 +12,7 @@ Guia dentro do aplicativo: **Como participar**, no aviso do beta.
 - Backup de dados e acervo, disponível ao proprietário com senha master, no mesmo painel.
 - Restauração local do formato de backup, sem alterar a produção.
 - Teste integrado automatizado com uma conta nova e sem poderes administrativos.
-- Convite e roteiro de 48 horas abaixo. Nenhuma mensagem foi enviada a terceiros.
+- Convite e roteiro de um mês abaixo. Nenhuma mensagem foi enviada a terceiros.
 
 ## Conferência do acervo real
 
@@ -55,7 +55,7 @@ https://sambu-r3-teste.marcosdiascwb.chatgpt.site/
 
 Toque em “Como participar” para ver o passo a passo. Entre com sua própria conta do ChatGPT, salve seu nome em “Minha conta” e escolha um livro.
 
-Nas primeiras 48 horas, pedimos que você leia um pouco, feche e reabra o livro e confira se voltou ao ponto certo. Se puder, teste também em outro dispositivo usando a mesma conta.
+Durante o primeiro mês, pedimos que você leia um pouco, feche e reabra o livro e confira se voltou ao ponto certo. Se puder, teste também em outro dispositivo usando a mesma conta.
 
 No leitor, use “Avaliar livro” para comentar a história e o texto e “Relatar problema” se algo não funcionar. Se não conseguir entrar, responda a esta mensagem.
 
@@ -63,7 +63,7 @@ O aplicativo ainda está em beta. Guardamos cadastro, biblioteca e progresso, al
 
 Por enquanto, pedimos que não encaminhe o link. Obrigado por participar!
 
-## Mensagem após 48 horas
+## Mensagem ao final do primeiro mês
 
 Como foi sua experiência com o Sambu?
 
@@ -83,4 +83,4 @@ Se ainda não fez, envie sua avaliação pelo botão “Avaliar livro”. Sua op
 - Backup real salvo e restaurado com sucesso em ambiente isolado.
 - Livros selecionados conferidos pelo responsável.
 
-Se houver falha impeditiva, manter os três pilotos até corrigir. Os primeiros dois dias são uma verificação de funcionamento, não uma prova de interesse de mercado.
+Se houver falha impeditiva, manter os três pilotos até corrigir. Nos primeiros acessos, confira o funcionamento. Ao longo do mês, acompanhe a leitura e reúna as avaliações para entender o interesse dos participantes.
