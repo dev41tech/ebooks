@@ -28,9 +28,10 @@ RUN addgroup -g 1001 -S nodejs && adduser -u 1001 -S sambu -G nodejs
 COPY --from=build --chown=sambu:nodejs /app/dist/standalone ./
 
 COPY --from=build --chown=sambu:nodejs /app/migrate-vps.mjs ./scripts/migrate-vps.mjs
+COPY --from=build --chown=sambu:nodejs /app/scripts/start-vps.sh ./scripts/start-vps.sh
 COPY --from=build --chown=sambu:nodejs /app/drizzle ./drizzle
 
 USER sambu
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["sh", "scripts/start-vps.sh"]
