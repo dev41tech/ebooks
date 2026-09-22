@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import { test, before, after } from 'node:test';
 import { build } from 'esbuild';
@@ -36,7 +37,7 @@ before(async()=>{
  initialize(module.makeRuntime(runtime));db=getDatabase();
  Object.assign(env,{SAMBU_BETA_OPEN:'false',SAMBU_ADMIN_EMAILS:admin,SAMBU_BETA_EMAILS:reader});
  const runtimePath=path.join(root,'tests/test-runtime.mjs');
- for(const [name,file] of Object.entries({uploads:'admin/uploads',books:'admin/books',imports:'admin/imports',catalog:'catalog',content:'catalog/content',file:'catalog/file',favorites:'favorites',progress:'progress',profile:'profile',subscription:'subscription',master:'admin/master',recommendations:'recommendations',feedback:'feedback',reviews:'reviews',analytics:'analytics',beta:'admin/beta',backup:'admin/backup',session:'session'})) {
+ for(const [name,file] of Object.entries({uploads:'admin/uploads',books:'admin/books',imports:'admin/imports',catalog:'catalog',content:'catalog/content',cover:'catalog/cover',file:'catalog/file',favorites:'favorites',progress:'progress',profile:'profile',subscription:'subscription',master:'admin/master',recommendations:'recommendations',feedback:'feedback',reviews:'reviews',analytics:'analytics',beta:'admin/beta',backup:'admin/backup',session:'session',transfer:'admin/catalog-transfer'})) {
   const outfile=path.join(output,`${name}.mjs`);
   await build({entryPoints:[path.join(root,`app/api/${file}/route.ts`)],outfile,bundle:true,platform:'node',format:'esm',packages:'external',plugins:[{name:'isolated-runtime',setup(b){b.onResolve({filter:/^(next\/headers|next\/navigation)$|(?:^|\/)db(?:\/index|\/runtime|\/storage)?$|(?:^|\/)auth$/},()=>({path:runtimePath,external:true}));}}]});
   routes[name]=await import(pathToFileURL(outfile));
@@ -435,4 +436,68 @@ test('Supabase adapter enforces range/etag and persists ownership in PostgreSQL'
   mode='missing';assert.equal(await bucket.head('missing'),null);
   await assert.rejects(()=>bucket.get('../secret'),/invalid_storage_key/);
  }finally{globalThis.fetch=original;for(const k of ['SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY'])if(previous[k]===undefined)delete process.env[k];else process.env[k]=previous[k];}
+});
+
+const transferRecord={id:'transferred-book',slug:'transferred-book',title:'Título da origem',subtitle:null,author:'Autor da origem',genre:'Romance',format:'EPUB',description:'Sinopse preservada.',featured:true,subscribersOnly:false,freeChapters:1,publishedAt:'2026-09-01',createdAt:'2026-08-31'};
+const transferKey='imports/direct/'+encodeURIComponent(admin)+'/transfer/source.epub';
+const transferRequest=(book=transferRecord,key=transferKey,bytes=epub,origin='https://sambu.test')=>new Request('https://sambu.test/api/admin/catalog-transfer',{method:'POST',headers:{'content-type':'application/json',origin},body:JSON.stringify({book,storageKey:key,sha256:createHash('sha256').update(bytes).digest('hex')})});
+async function unlockTransfer(){
+ identity.email=admin;
+ const response=await routes.master.POST(masterRequest('login'));
+ assert.equal(response.status,200);
+ identity.cookie=response.headers.get('set-cookie').split(';')[0];
+}
+test('catalog transfer requires owner, master and same origin',async()=>{
+ identity.email=null;assert.equal((await routes.transfer.GET()).status,401);
+ identity.email=reader;assert.equal((await routes.transfer.POST(transferRequest())).status,403);
+ env.SAMBU_ADMIN_TESTER_EMAILS='transfer-tester@example.test';identity.email=env.SAMBU_ADMIN_TESTER_EMAILS;
+ assert.equal((await routes.transfer.POST(transferRequest())).status,403);delete env.SAMBU_ADMIN_TESTER_EMAILS;
+ identity.email=admin;identity.cookie='';assert.equal((await routes.transfer.GET()).status,403);
+ await unlockTransfer();assert.equal((await routes.transfer.POST(transferRequest(transferRecord,transferKey,epub,'https://evil.test'))).status,403);
+});
+test('catalog transfer publishes complete reading, preserves source IDs and never duplicates or overwrites',async()=>{
+ await unlockTransfer();
+ await env.BUCKET.put(transferKey,epub,{customMetadata:{owner:admin},httpMetadata:{contentType:'application/epub+zip'}});
+ const result=await routes.transfer.POST(transferRequest());assert.equal(result.status,201,await result.text());
+ const repeated=await routes.transfer.POST(transferRequest({...transferRecord,title:'Do not replace'}));assert.equal(repeated.status,200);
+ assert.equal((await repeated.json()).alreadyExists,true);
+ const saved=await db.prepare('SELECT title,featured FROM books WHERE id=?').bind(transferRecord.id).first();
+ assert.deepEqual(saved,{title:transferRecord.title,featured:true});
+ assert.equal((await routes.content.GET(new Request('https://sambu.test/api?id='+transferRecord.id+'&chapter=0'))).status,200);
+ assert.equal((await routes.transfer.POST(transferRequest({...transferRecord,id:'conflicting-id'}))).status,409);
+ await db.prepare("UPDATE books SET status='deleted' WHERE id=?").bind(transferRecord.id).run();
+ assert.equal((await routes.transfer.POST(transferRequest())).status,409);
+});
+test('catalog transfer rejects foreign uploads, invalid EPUB and changed bytes before publication',async()=>{
+ await unlockTransfer();const book={...transferRecord,id:'invalid-transfer',slug:'invalid-transfer'};
+ const key='imports/direct/'+encodeURIComponent(admin)+'/transfer/invalid.epub';
+ await env.BUCKET.put(key,epub,{customMetadata:{owner:reader}});
+ assert.equal((await routes.transfer.POST(transferRequest(book,key))).status,422);
+ await env.BUCKET.put(key,epub,{customMetadata:{owner:admin}});
+ assert.equal((await routes.transfer.POST(transferRequest(book,key,strToU8('different')))).status,422);
+ const invalid=strToU8('not an ebook');await env.BUCKET.put(key,invalid,{customMetadata:{owner:admin}});
+ assert.equal((await routes.transfer.POST(transferRequest(book,key,invalid))).status,422);
+ assert.equal(await db.prepare('SELECT id FROM books WHERE id=?').bind(book.id).first(),null);
+});
+test('private supplied backup restores every published book, cover and first chapter in isolated PostgreSQL', {skip:!process.env.SAMBU_VALIDATION_BACKUP}, async()=>{
+ await unlockTransfer();
+ const outfile=path.join(output,'catalog-transfer-helper.mjs');
+ await build({entryPoints:[path.join(root,'app/lib/catalog-transfer.ts')],outfile,bundle:true,platform:'node',format:'esm',packages:'external'});
+ const {inspectCatalogBackup,extractBackupBook}=await import(pathToFileURL(outfile));
+ const zip=new Uint8Array(await readFile(process.env.SAMBU_VALIDATION_BACKUP));
+ const items=inspectCatalogBackup(zip);
+ const expected=JSON.parse(strFromU8(unzipSync(zip,{filter:f=>f.name==='snapshot.json'})['snapshot.json'])).tables.books.filter(b=>b.status==='published');
+ assert.equal(items.length,expected.length);
+ const privateCounts=await db.prepare('SELECT (SELECT count(*) FROM profiles) AS profiles,(SELECT count(*) FROM reading_progress) AS progress').first();
+ for(const item of items){
+  const file=extractBackupBook(zip,item),key='imports/direct/'+encodeURIComponent(admin)+'/transfer/'+item.book.id+'.epub';
+  await env.BUCKET.put(key,file,{customMetadata:{owner:admin},httpMetadata:{contentType:'application/epub+zip'}});
+  const response=await routes.transfer.POST(transferRequest(item.book,key,file));assert.equal(response.status,201,item.book.title+': '+await response.text());
+  const cover=await routes.cover.GET(new Request('https://sambu.test/api?id='+item.book.id));assert.equal(cover.status,200,'Cover: '+item.book.title);
+  assert.ok((await cover.arrayBuffer()).byteLength>0);
+  const reading=await routes.content.GET(new Request('https://sambu.test/api?id='+item.book.id+'&chapter=0'));assert.equal(reading.status,200,'Reading: '+item.book.title);
+  assert.ok((await reading.json()).reader.chapter.blocks.length>0);
+ }
+ assert.deepEqual(await db.prepare('SELECT (SELECT count(*) FROM profiles) AS profiles,(SELECT count(*) FROM reading_progress) AS progress').first(),privateCounts);
+ console.log('Private backup verified: '+items.length+' books, covers and chapter reads.');
 });
