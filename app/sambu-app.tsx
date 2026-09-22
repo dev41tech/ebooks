@@ -45,6 +45,11 @@ export default function SambuApp({user}:{user:User}) {
   const [openingBookId,setOpeningBookId] = useState<string|null>(null), [favoriteBusy,setFavoriteBusy] = useState(false);
   const readingBusy=openingBookId!==null;
   const readingLock=useRef(false);
+  const openingRequest=useRef<AbortController|null>(null);
+  const cancelOpening=useCallback(()=>{
+    openingRequest.current?.abort();openingRequest.current=null;
+    readingLock.current=false;setOpeningBookId(null);
+  },[]);
   const [theme,setTheme] = useState("sepia"), [font,setFont] = useState(20);
   const toastTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
   const notify = useCallback((text:string)=>{setToast(text);if(toastTimer.current)clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(""),6000);},[]);
@@ -56,11 +61,12 @@ export default function SambuApp({user}:{user:User}) {
   },[user?.email,user?.participant]);
   useEffect(()=>{if(view!=="catalog"||query.trim().length<2)return;const timer=setTimeout(()=>rememberSearch(query),1000);return()=>clearTimeout(timer);},[query,view,rememberSearch]);
   const navigate = useCallback((next:View,book?:Book)=>{
+    if(next!=="reader")cancelOpening();
     setView(next); if(book)setSelected(book);
     const url = new URL(window.location.href);url.search="";url.searchParams.set("view",next);
     if(book)url.searchParams.set("book",book.id);
     if (url.href !== window.location.href) window.history.pushState({},"",url);window.scrollTo(0,0);
-  },[]);
+  },[cancelOpening]);
   const load = useCallback(async()=>{
     setLoading(true);setError("");
     try { const data=await requestJson("/api/catalog");setBooks(data.books||[]);booksRef.current=data.books||[];return data.books as Book[]; }
@@ -79,13 +85,13 @@ export default function SambuApp({user}:{user:User}) {
     if(!user.participant){notify(messages.invitation_required);navigate("profile");return;}
     if(readingLock.current)return;
     readingLock.current=true;setOpeningBookId(book.id);
-    const controller=new AbortController();
+    const controller=new AbortController();openingRequest.current=controller;
     const timeout=setTimeout(()=>controller.abort(),30000);
     try {
-      const progress=await requestJson("/api/progress",{cache:"no-store",signal:controller.signal});setLocations(progress.locations||{});
+      const progress=await requestJson("/api/progress",{cache:"no-store",signal:controller.signal});if(openingRequest.current!==controller)return;setLocations(progress.locations||{});
       if(book.format?.toUpperCase().includes("PDF")){setReaderPage(null);navigate("reader",book);}
-      else {const page=await loadReaderPage(book.id,{position:progress.locations?.[book.id]?.position||0},controller.signal);setReaderPage(page);navigate("reader",book);}
-    }catch(e){trackReading('reader_open_failed',book.id);notify(controller.signal.aborted?"A abertura demorou mais que o esperado. Verifique sua conexão e tente novamente.":(e as Error).message);}finally{clearTimeout(timeout);readingLock.current=false;setOpeningBookId(null);}
+      else {const page=await loadReaderPage(book.id,{position:progress.locations?.[book.id]?.position||0},controller.signal);if(openingRequest.current!==controller)return;setReaderPage(page);navigate("reader",book);}
+    }catch(e){if(openingRequest.current!==controller)return;trackReading('reader_open_failed',book.id);notify(controller.signal.aborted?"A abertura demorou mais que o esperado. Verifique sua conexão e tente novamente.":(e as Error).message);}finally{clearTimeout(timeout);if(openingRequest.current===controller){openingRequest.current=null;readingLock.current=false;setOpeningBookId(null);}}
   },[user,navigate,notify]);
   useEffect(()=>{
     let active=true;
@@ -101,8 +107,8 @@ export default function SambuApp({user}:{user:User}) {
     };
     restore();
     try{const stored=JSON.parse(localStorage.getItem(`sambu:reader:${user?.email||"guest"}`)||"{}");if(["light","sepia","dark"].includes(stored.theme))setTheme(stored.theme);if(stored.font>=16&&stored.font<=32)setFont(stored.font);}catch{}
-    const pop=async()=>{const p=new URLSearchParams(window.location.search);const next=p.get("view") as View;const book=booksRef.current.find(b=>b.id===p.get("book"));if(book&&(next==="detail"||next==="reader")){if(next==="reader")await startReading(book);else{setSelected(book);setView("detail");}}else setView(["home","catalog","library","profile","admin","guide"].includes(next)?next:"home");};
-    window.addEventListener("popstate",pop);return()=>{active=false;window.removeEventListener("popstate",pop);};
+    const pop=async()=>{cancelOpening();const p=new URLSearchParams(window.location.search);const next=p.get("view") as View;const book=booksRef.current.find(b=>b.id===p.get("book"));if(book&&(next==="detail"||next==="reader")){if(next==="reader")await startReading(book);else{setSelected(book);setView("detail");}}else setView(["home","catalog","library","profile","admin","guide"].includes(next)?next:"home");};
+    window.addEventListener("popstate",pop);return()=>{active=false;cancelOpening();window.removeEventListener("popstate",pop);};
   // Initialization runs once per authenticated identity.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[user?.email]);

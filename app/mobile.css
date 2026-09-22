@@ -32,7 +32,7 @@
  .beta-app .search-box input {min-width:0;padding:14px 8px;}
  .beta-app .filter-row {display:grid;grid-template-columns:minmax(0,1fr);gap:16px;}
  .beta-app .filter-row label {justify-content:space-between;}
- .beta-app .filter-row select {max-width:70%;padding:10px 6px;}
+ .beta-app .filter-row select {display:block;max-width:70%;min-height:44px;padding:10px 6px;}
  .beta-app .tabs {display:flex;gap:8px;flex-wrap:wrap;}
  .beta-app .detail>section {display:grid;grid-template-columns:minmax(0,1fr);gap:24px;}
  .beta-app .detail .beta-cover {width:min(210px,65vw);margin:auto;}
