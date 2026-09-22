@@ -11,7 +11,7 @@ Não faça merge das branches `sambu-beta-r26` ou `sambu-beta-r26-pr`: elas repr
 - Login existente do Supabase, PostgreSQL, campos de classificação, tabelas/APIs do Studio e Docker/Easypanel preservados. O Studio não ganhou funcionalidades novas nesta integração.
 - Storage privado do Supabase com leitura por intervalo e metadados de propriedade no PostgreSQL. A service role fica somente no servidor.
 - Novas tabelas privadas com RLS sem políticas para clientes; acesso pela conexão PostgreSQL do servidor/proprietário.
-- Migração aditiva, executada em transação, com trava e checksum. Não é executada automaticamente ao iniciar o aplicativo.
+- Migrações aditivas 0002 e 0003 executadas automaticamente antes de iniciar o container, em uma única transação, com trava e checksum. A 0002 ausente ou parcialmente aplicada é completada sem substituir dados. Reiniciar o container não repete migrações já registradas.
 - Progresso legado em porcentagem é convertido em posição aproximada na primeira abertura; as próximas gravações usam posição e revisão.
 
 Os dados e arquivos do site hospedado no ChatGPT NÃO são transportados por este PR. O acervo utilizado será o do PostgreSQL/Storage configurado na VPS. A transferência do acervo do Sites precisa de operação própria. Web e navegador mobile usam o mesmo aplicativo; esta branch não é um pacote publicado na App Store/Play Store.
@@ -39,19 +39,19 @@ O proprietário precisa definir/desbloquear a senha master pelo painel. O cadast
 
 1. Faça um backup completo do PostgreSQL e do bucket atual. Confirme recuperação em ambiente separado.
 2. Crie um serviço separado no Easypanel apontando para esta branch, com banco e bucket de homologação. Não reutilize os dados de produção para testar exclusões/importações.
-3. Confirme que as migrações existentes `0000`, `0001` e `0002` estão aplicadas. Em uma instalação nova, aplique-as em ordem pelo SQL Editor/psql antes do passo seguinte.
-4. Build pelo Dockerfile, porta interna 3000. O container inclui o comando de migração. Pelo console do container, execute:
+3. Confirme que as migrações de base `0000` e `0001` estão aplicadas. Em uma instalação nova, aplique-as em ordem pelo SQL Editor/psql antes do passo seguinte. A classificação `0002` e a atualização do beta `0003` são gerenciadas pelo aplicativo.
+4. Build pelo Dockerfile, porta interna 3000. Mantenha o comando de inicialização do Dockerfile; remova eventual substituição por `node server.js` no Easypanel. Clique em **Implantar**. O container aplica as migrações pendentes e só inicia o servidor após sucesso. Nos logs devem aparecer `applied` (atualização) ou `already_applied` (já atualizado), seguidos de `Sambu: banco atualizado; iniciando o aplicativo.` Se houver erro, o servidor não inicia e a transação é revertida. Para executar manualmente em um container desta versão:
 
    ```sh
    node scripts/migrate-vps.mjs
    ```
 
-   Em um checkout com dependências e `DATABASE_URL` configurada, o equivalente é `npm run db:migrate:vps`. A saída será `applied` ou `already_applied`. O comando não apaga tabelas e rejeita uma base sem os pré-requisitos. Não aplique a mesma migração também por outro runner.
+   Em um checkout com dependências e `DATABASE_URL` configurada, o equivalente é `npm run db:migrate:vps`. O comando não apaga tabelas e rejeita uma base sem os pré-requisitos. Não aplique as migrações 0002/0003 também por outro runner.
 5. Valide cadastro, confirmação de e-mail, login, renovação de sessão, nome/perfil e saída. Um leitor comum não deve acessar administração.
 6. Importe um EPUB e um PDF, revise e publique. Confira capa, leitura, progresso, favoritos e busca. Confirme que o bucket privado bloqueia acesso público direto.
 7. Abra o mesmo EPUB em desktop e celular com a mesma conta; avance, feche, retome no outro e tente uma gravação atrasada. Confira também fonte, capítulos, voltar/avançar e conexão lenta.
 8. Confirme no Storage real respostas HEAD com ETag/tamanho e GET com Range (206). O adaptador recusa ignorar o intervalo para evitar baixar todo o livro a cada capítulo. Valide os limites/tipos permitidos do bucket: EPUB, PDF, imagens, JSON e application/octet-stream para caches e partes; máximo do app: EPUB 32 MB, PDF 250 MB, sujeito aos limites do plano do Supabase/proxy.
-9. Envie avaliação/relato e confira o painel; baixe o backup. Só depois marque o PR como pronto e faça o merge. Na produção, aplique a migração antes de encaminhar tráfego à versão nova.
+9. Envie avaliação/relato e confira o painel; baixe o backup. Só depois marque o PR como pronto e faça o merge. Na produção, o container aguarda a migração terminar antes de aceitar tráfego.
 
 ## Backup e reversão
 
