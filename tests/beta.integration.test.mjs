@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
 import { test, before, after } from 'node:test';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { zipSync, strToU8 } from 'fflate';
-import { readFile, readdir, mkdir, rm } from 'node:fs/promises';
+import { readFile, readdir, mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { env, identity } from './test-runtime.mjs';
@@ -36,7 +37,7 @@ before(async()=>{
    for(const statement of sql.split(';').map(s=>s.replace(/--> statement-breakpoint/g,'').trim()).filter(Boolean))await db.prepare(statement).run();
  }
  const runtimePath=path.join(root,'tests/test-runtime.mjs');
- for(const [name,file] of Object.entries({books:'admin/books',imports:'admin/imports',catalog:'catalog',content:'catalog/content',file:'catalog/file',favorites:'favorites',progress:'progress',profile:'profile',subscription:'subscription',master:'admin/master',recommendations:'recommendations',feedback:'feedback',reviews:'reviews',analytics:'analytics',beta:'admin/beta'})) {
+ for(const [name,file] of Object.entries({books:'admin/books',imports:'admin/imports',catalog:'catalog',content:'catalog/content',file:'catalog/file',favorites:'favorites',progress:'progress',profile:'profile',subscription:'subscription',master:'admin/master',recommendations:'recommendations',feedback:'feedback',reviews:'reviews',analytics:'analytics',beta:'admin/beta',backup:'admin/backup',session:'session'})) {
   const outfile=path.join(output,`${name}.mjs`);
   await build({entryPoints:[path.join(root,`app/api/${file}/route.ts`)],outfile,bundle:true,platform:'node',format:'esm',packages:'external',plugins:[{name:'isolated-runtime',setup(b){b.onResolve({filter:/^(cloudflare:workers|next\/headers|next\/navigation)$/},()=>({path:runtimePath,external:true}));}}]});
   routes[name]=await import(pathToFileURL(outfile));
@@ -343,4 +344,48 @@ test('editorial alerts identify duplicated sections without rewriting source tex
  assert.ok(result.report.warnings.some(w=>w.includes('título(s)')));
  assert.ok(result.report.warnings.some(w=>w.includes('hífen')));
  assert.deepEqual(new Uint8Array(await (await env.BUCKET.get('imports/direct/duplicate.epub')).arrayBuffer()),bytes);
+});
+
+
+test('pilot backup is master-only, contains product data and restores to an isolated directory',async()=>{
+ const request=()=>new Request('https://sambu.test/api/admin/backup',{method:'POST',headers:{origin:'https://sambu.test'}});
+ identity.email=reader;assert.equal((await routes.backup.POST(request())).status,403);
+ identity.email='grazi.sam@hotmail.com';assert.equal((await routes.backup.POST(request())).status,403);
+ identity.email=admin;identity.cookie='';assert.equal((await routes.backup.POST(request())).status,403);
+ await db.prepare('DELETE FROM master_attempts').run();const login=await routes.master.POST(masterRequest('login'));identity.cookie=login.headers.get('set-cookie').split(';')[0];
+ assert.equal((await routes.backup.POST(new Request('https://sambu.test/api/admin/backup',{method:'POST',headers:{origin:'https://other.test'}}))).status,403);
+ const response=await routes.backup.POST(request());assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'application/zip');
+ const archive=path.join(output,'backup.zip'),target=path.join(output,'restored');
+ await writeFile(archive,new Uint8Array(await response.arrayBuffer()));
+ const result=JSON.parse(execFileSync('python',['scripts/restore-pilot-backup.py',archive,target],{cwd:root,encoding:'utf8'}));
+ assert.equal(result.integrity,'ok');assert.ok(result.assets>0);assert.equal(result.productionChanged,false);
+ const snapshot=JSON.parse(await readFile(path.join(target,'snapshot.json'),'utf8'));
+ assert.equal('master_credentials' in snapshot.tables,false);assert.equal('master_sessions' in snapshot.tables,false);
+ assert.equal(snapshot.tables.books.length,(await db.prepare('SELECT COUNT(*) AS n FROM books').first()).n);
+ assert.ok(snapshot.tables.reading_progress.length>0);assert.ok(snapshot.tables.profiles.length>0);
+ assert.deepEqual(new Uint8Array(await readFile(path.join(target,'assets/imports/direct/valid.epub'))),epub);
+ assert.throws(()=>execFileSync('python',['scripts/restore-pilot-backup.py',archive,target],{cwd:root,stdio:'pipe'}));
+});
+
+test('a new pilot reader can save a profile, open, resume and report without admin privileges',async()=>{
+ env.SAMBU_BETA_OPEN='true';identity.email='pilot-new@example.test';identity.cookie='';
+ assert.equal((await (await routes.session.GET()).json()).user.admin,false);
+ assert.equal((await routes.profile.PATCH(payload({displayName:'Leitor piloto'},'PATCH'))).status,200);
+ const page=await (await routes.content.GET(new Request(`https://sambu.test/api?id=${publishedId}&position=0`))).json();assert.ok(page.reader.chapter.blocks.length);
+ const saved=await (await routes.progress.POST(payload({bookId:publishedId,position:1,progress:40,revision:0}))).json();assert.equal(saved.location.position,1);
+ const resumed=await (await routes.progress.GET()).json();assert.equal(resumed.locations[publishedId].position,1);
+ assert.equal((await routes.feedback.POST(payload({id:crypto.randomUUID(),bookId:publishedId,category:'layout',message:'Teste integrado do leitor piloto.',chapterLabel:'Capítulo 1',position:1,device:'mobile'}))).status,201);
+ assert.equal((await routes.books.GET()).status,403);
+});
+
+
+test('backup rejects missing assets and fails the download if a source changes mid-copy',async()=>{
+ identity.email=admin;await db.prepare('DELETE FROM master_attempts').run();const login=await routes.master.POST(masterRequest('login'));identity.cookie=login.headers.get('set-cookie').split(';')[0];
+ const request=()=>new Request('https://sambu.test/api/admin/backup',{method:'POST',headers:{origin:'https://sambu.test'}});
+ const old=await db.prepare('SELECT epub_key FROM books WHERE id=?').bind(publishedId).first();
+ await db.prepare('UPDATE books SET epub_key=? WHERE id=?').bind('missing-source.epub',publishedId).run();
+ try{const missing=await routes.backup.POST(request());assert.equal(missing.status,409);assert.equal((await missing.json()).error,'backup_missing_file');}finally{await db.prepare('UPDATE books SET epub_key=? WHERE id=?').bind(old.epub_key,publishedId).run();}
+ const bucket=env.BUCKET;
+ env.BUCKET=new Proxy(bucket,{get(target,name){const value=Reflect.get(target,name);return typeof value==='function'?(...args)=>{if(name==='get'&&args[0]==='imports/direct/valid.epub'&&args[1]?.onlyIf)return Promise.resolve(null);return value.apply(target,args);}:value;}});
+ try{const changed=await routes.backup.POST(request());assert.equal(changed.status,200);await assert.rejects(()=>changed.arrayBuffer(),/backup_source_changed/);}finally{env.BUCKET=bucket;}
 });

@@ -10,7 +10,7 @@
  .beta-app>header nav button {font-size:14px;}
  .beta-app .review-layout {grid-template-columns:minmax(0,1fr);}
 }
-@media (max-width:760px) {
+@media (max-width:900px) {
  .beta-app {padding-bottom:calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));}
  .beta-app>header {height:auto;min-height:64px;padding:12px max(16px,env(safe-area-inset-right)) 12px max(16px,env(safe-area-inset-left));gap:12px;}
  .beta-app>header nav {display:none;}
@@ -146,3 +146,11 @@
 .beta-app .editorial-check li{margin:8px 0}
 @media(max-width:768px){.beta-app .beta-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.beta-app .tabs{flex-wrap:wrap}.beta-app .feedback-form{padding:16px}}
 @media(max-width:360px){.beta-app .beta-metrics{grid-template-columns:1fr}.beta-app .feedback-actions button{width:100%}}
+.beta-app .pilot-guide{max-width:920px;margin:auto}
+.beta-app .pilot-guide h1{font-size:clamp(2rem,5vw,3.5rem);line-height:1.15}
+.beta-app .pilot-guide h2{font-size:1.4rem}
+.beta-app .pilot-guide p,.beta-app .pilot-guide li{font-size:1rem;line-height:1.6}
+.beta-app .pilot-guide li{margin:.75rem 0}
+.beta-app .pilot-guide-link{color:inherit;text-decoration:underline;background:none;border:0;font:inherit;padding:8px;min-height:44px}
+
+.beta-app .pilot-guide ol,.beta-app .beta-report>ol{list-style:decimal;padding-left:1.5rem}

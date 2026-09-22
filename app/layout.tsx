@@ -4,9 +4,10 @@ import "./review.css";
 import "./mobile.css";
 export const metadata: Metadata = {
   metadataBase: new URL("https://sambu-r3-teste.marcosdiascwb.chatgpt.site"),
+  icons: {icon:"/favicon.svg",shortcut:"/favicon.svg"},
   title: "Sambu",
   description:
-    "Sambu — leia ebooks selecionados no beta por convite.",
+    "Sambu — comunidade de leitura. Participe do beta gratuito e ajude a melhorar os livros e o aplicativo.",
   openGraph: {
     title: "Sambu",
     description: "Histórias que ficam em você.",

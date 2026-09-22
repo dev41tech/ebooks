@@ -2,6 +2,7 @@
 import BetaDashboard from './components/beta-dashboard';
 import EditorialCheck from './components/editorial-check';
 import {trackReading} from './lib/telemetry';
+import PilotGuide from "./components/pilot-guide";
 import Reader from "./components/reader";
 import {loadReaderPage} from "./lib/reader-client";
 import type {ReaderPage} from "./lib/reader-content";
@@ -10,7 +11,7 @@ import { apiFetch, serviceUrl } from "./lib/client-api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type User = { name: string; email: string; admin: boolean; participant: boolean; adminTrial?:boolean } | null;
-type View = "home" | "catalog" | "library" | "detail" | "reader" | "profile" | "admin";
+type View = "home" | "catalog" | "library" | "detail" | "reader" | "profile" | "admin" | "guide";
 type Book = { id: string; title: string; author: string; genre: string; description: string; format?: string; status: string; publishedAt?: string; coverKey?: string; language?: string; };
 type Location = { position: number; progress: number; revision?:number };
 type ApiPayload = { recommendations?:{bookId:string;reason:string}[]; configured?:boolean; unlocked?:boolean; error?: string; message?: string; books?: Book[]; profile?: { displayName?: string; tasteProfile?:ReaderProfile }; favorites?: string[]; locations?: Record<string,Location>; batches?: ImportBatch[]; items?: StagedBook[]; uploadId?: string; chunkSize?: number; batch: { validItems:number; errorItems:number }; publishedBookId?:string; storageKey?:string; fileName?:string; contentType?:string; fileSize?:number };
@@ -88,18 +89,19 @@ export default function SambuApp({user}:{user:User}) {
   },[user,navigate,notify]);
   useEffect(()=>{
     let active=true;
+    if(new URLSearchParams(window.location.search).get("view")==="guide")setView("guide");
     const restore=async()=>{
       const rows=await load();if(!active||!rows)return;
       await loadLibrary();if(!active)return;
       const params=new URLSearchParams(window.location.search);const target=params.get("view") as View;
       const book=rows.find(b=>b.id===params.get("book"));
       if(book){setSelected(book);if(target==="reader")await startReading(book);else setView("detail");}
-      else if(["catalog","library","profile","admin"].includes(target))setView(target);
+      else if(["catalog","library","profile","admin","guide"].includes(target))setView(target);
       if(params.get("search"))setQuery(params.get("search")!);
     };
     restore();
     try{const stored=JSON.parse(localStorage.getItem(`sambu:reader:${user?.email||"guest"}`)||"{}");if(["light","sepia","dark"].includes(stored.theme))setTheme(stored.theme);if(stored.font>=16&&stored.font<=32)setFont(stored.font);}catch{}
-    const pop=async()=>{const p=new URLSearchParams(window.location.search);const next=p.get("view") as View;const book=booksRef.current.find(b=>b.id===p.get("book"));if(book&&(next==="detail"||next==="reader")){if(next==="reader")await startReading(book);else{setSelected(book);setView("detail");}}else setView(["home","catalog","library","profile","admin"].includes(next)?next:"home");};
+    const pop=async()=>{const p=new URLSearchParams(window.location.search);const next=p.get("view") as View;const book=booksRef.current.find(b=>b.id===p.get("book"));if(book&&(next==="detail"||next==="reader")){if(next==="reader")await startReading(book);else{setSelected(book);setView("detail");}}else setView(["home","catalog","library","profile","admin","guide"].includes(next)?next:"home");};
     window.addEventListener("popstate",pop);return()=>{active=false;window.removeEventListener("popstate",pop);};
   // Initialization runs once per authenticated identity.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -122,7 +124,7 @@ export default function SambuApp({user}:{user:User}) {
   const cards=(list:Book[])=><div className="book-grid">{list.map(book=><BookCard key={book.id} book={book} saved={favorites.includes(book.id)} onOpen={()=>navigate("detail",book)} onFavorite={()=>favorite(book.id)}/>)}</div>;
   return <div className="app-shell beta-app">
     {view!=="reader"&&<header><button className="brand community-brand" onClick={()=>navigate("home")} aria-label="Início Sambu"><img src="/sambu-comunidade-horizontal.webp" alt="Sambu — Comunidade de leitura" width="640" height="256"/></button><nav aria-label="Navegação principal">{NAV.map(item=><button key={item.id} className={view===item.id?"active":""} onClick={()=>navigate(item.id)}>{item.label}</button>)}{user?.admin&&<button onClick={()=>navigate("admin")}>Administração</button>}</nav><button className="outline" onClick={()=>navigate("profile")}>{user?"Minha conta":"Entrar"}</button></header>}
-    {view!=="reader"&&<div className="beta-banner">Versão beta · leitura gratuita · registramos uso e falhas de leitura para melhorar o aplicativo</div>}
+    {view!=="reader"&&<div className="beta-banner">Versão beta · leitura gratuita · registramos uso e falhas de leitura para melhorar o aplicativo · <button className="pilot-guide-link" onClick={()=>navigate("guide")}>Como participar</button></div>}
     {view!=="reader"&&<nav className="beta-mobile-nav" aria-label="Navegação móvel">{NAV.map(x=><button key={x.id} aria-current={view===x.id?"page":undefined} onClick={()=>navigate(x.id)}>{x.id==="library"?"Biblioteca":x.label}</button>)}<button aria-current={view==="profile"?"page":undefined} onClick={()=>navigate("profile")}>Conta</button>{user?.admin&&<button aria-current={view==="admin"?"page":undefined} onClick={()=>navigate("admin")}>Admin</button>}</nav>}
     {view==="home"&&<BetaHome books={books} user={user} loading={loading} error={error} retry={load} favorites={favorites} locations={locations} readingBusy={readingBusy} openingBookId={openingBookId} onOpen={b=>navigate("detail",b)} onRead={startReading} onFavorite={favorite} onCatalog={g=>{if(g)rememberSearch(g);setQuery("");setGenre(g||"Todos");navigate("catalog");}} onLibrary={()=>navigate("library")} onSearch={q=>{rememberSearch(q);setQuery(q);setGenre("Todos");navigate("catalog");}}/>}
     {view==="catalog"&&<main className="page"><div className="page-title"><p className="eyebrow">SAMBU EBOOKS</p><h1>Explore o acervo</h1><p>Escolha uma história e leia no seu ritmo.</p></div>
@@ -137,6 +139,7 @@ export default function SambuApp({user}:{user:User}) {
     </>}</main>}
     {view==="detail"&&selected&&<main className="detail"><button className="back" onClick={()=>navigate("catalog")}>← Voltar ao acervo</button><section><Cover book={selected}/><div className="book-info"><p>{selected.genre}</p><h1>{selected.title}</h1><p>por {selected.author}</p><p className="blurb">{selected.description}</p><p>{selected.format||"Ebook"} · Disponível gratuitamente no beta</p><div className="actions"><button className="primary" disabled={readingBusy} onClick={()=>startReading(selected)}>{openingBookId===selected.id?"Abrindo…":locations[selected.id]?.progress&&locations[selected.id].progress<100?"Continuar leitura":"Ler agora"}</button><button className="outline" disabled={favoriteBusy} onClick={()=>favorite(selected.id)}>{favorites.includes(selected.id)?"♥ Salvo":"♡ Salvar"}</button></div></div></section></main>}
     {view==="reader"&&selected&&<Reader key={selected.id} book={selected} initialPage={readerPage} initial={locations[selected.id]||{position:0,progress:0}} theme={theme} font={font} preference={preference} onSave={save} onBack={()=>navigate("detail",selected)}/>}
+    {view==="guide"&&<PilotGuide signedIn={!!user} onCatalog={()=>navigate("catalog")} onProfile={()=>navigate("profile")}/>}
     {view==="profile"&&<Profile user={user} notify={notify}/>}
     {view==="admin"&&<main className="page">{user?.admin?(user.adminTrial?<><p className="beta-banner">Administração de testes · as alterações afetam o acervo real.</p><Admin owner={user.email} notify={notify} onChange={load}/></>:<MasterGate owner={user.email} notify={notify} onChange={load}/>):<AccessNotice user={user} admin/>}</main>}
     {toast&&<div className="toast" role="status">{toast}</div>}
