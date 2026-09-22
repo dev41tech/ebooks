@@ -33,6 +33,8 @@ export async function getUser(): Promise<SessionUser | null> {
   const { url, anonKey } = authConfig();
   const response = await fetch(`${url}/auth/v1/user`, {
     headers: { authorization: `Bearer ${token}`, apikey: anonKey },
+    cache: "no-store",
+    signal: AbortSignal.timeout(15000),
   });
   if (!response.ok) return null;
 
@@ -45,7 +47,7 @@ export async function getUser(): Promise<SessionUser | null> {
 
   return {
     id: payload.id,
-    email: payload.email,
+    email: payload.email.toLowerCase(),
     displayName:
       payload.user_metadata?.display_name ||
       payload.user_metadata?.full_name ||

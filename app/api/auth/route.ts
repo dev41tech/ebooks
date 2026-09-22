@@ -30,12 +30,16 @@ async function supabaseAuth(path: string, payload: unknown) {
       authorization: `Bearer ${anonKey}`,
     },
     body: JSON.stringify(payload),
+    cache: "no-store",
+    signal: AbortSignal.timeout(15000),
   });
   return { response, data: (await response.json()) as TokenResponse };
 }
 
 /** POST /api/auth  { action: "login" | "signup" | "refresh" | "logout" } */
 export async function POST(request: Request) {
+  const origin=request.headers.get('origin');
+  if(origin && origin!==new URL(request.url).origin)return Response.json({error:'invalid_origin'},{status:403});
   const body = (await request.json().catch(() => ({}))) as Record<
     string,
     unknown

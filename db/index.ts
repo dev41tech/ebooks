@@ -8,6 +8,13 @@ let database: ReturnType<typeof drizzle<typeof schema>> | null = null;
 export async function getDb() {
   if (database) return database;
 
+  const client = getSql();
+  database = drizzle(client, { schema });
+  return database;
+}
+
+export function getSql(){
+  if(client)return client;
   const url = process.env.DATABASE_URL;
   if (!url) {
     throw new Error(
@@ -18,6 +25,5 @@ export async function getDb() {
   // `prepare: false` e obrigatorio com o pooler do Supabase em modo transaction:
   // prepared statements nao sobrevivem entre conexoes reaproveitadas.
   client = postgres(url, { prepare: false });
-  database = drizzle(client, { schema });
-  return database;
+  return client;
 }

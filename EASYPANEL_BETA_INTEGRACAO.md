@@ -1,0 +1,68 @@
+# Integração do beta R26 na VPS
+
+Branch `integrate/beta-r26-easypanel`, baseada na `main` (`5a2611e`).
+Não faça merge das branches `sambu-beta-r26` ou `sambu-beta-r26-pr`: elas representam o snapshot do ambiente Sites, com outra infraestrutura.
+
+## O que esta integração entrega
+
+- Interface responsiva do beta, logo WebP de 13.260 bytes, sugestões, cadastro ampliado, avaliações e painel do piloto de um mês.
+- Leitura por capítulo, títulos consistentes, aumento/redução de fonte e progresso com revisão para impedir que um dispositivo atrasado sobrescreva o outro.
+- Importação em lote com revisão editorial, upload em partes, permissões e exclusão lógica protegida.
+- Login existente do Supabase, PostgreSQL, campos de classificação, tabelas/APIs do Studio e Docker/Easypanel preservados. O Studio não ganhou funcionalidades novas nesta integração.
+- Storage privado do Supabase com leitura por intervalo e metadados de propriedade no PostgreSQL. A service role fica somente no servidor.
+- Novas tabelas privadas com RLS sem políticas para clientes; acesso pela conexão PostgreSQL do servidor/proprietário.
+- Migração aditiva, executada em transação, com trava e checksum. Não é executada automaticamente ao iniciar o aplicativo.
+- Progresso legado em porcentagem é convertido em posição aproximada na primeira abertura; as próximas gravações usam posição e revisão.
+
+Os dados e arquivos do site hospedado no ChatGPT NÃO são transportados por este PR. O acervo utilizado será o do PostgreSQL/Storage configurado na VPS. A transferência do acervo do Sites precisa de operação própria. Web e navegador mobile usam o mesmo aplicativo; esta branch não é um pacote publicado na App Store/Play Store.
+
+## Variáveis de ambiente
+
+Defina pelo painel de secrets do Easypanel, nunca no repositório:
+
+| Variável | Uso |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL; conexão Supabase adequada ao servidor. Driver usa `prepare:false`. |
+| `SUPABASE_URL` | URL HTTPS do projeto. |
+| `SUPABASE_ANON_KEY` | Autenticação Supabase. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Acesso do servidor ao Storage. |
+| `SUPABASE_STORAGE_BUCKET` | Bucket privado; padrão `sambu`. |
+| `ADMIN_EMAILS` | E-mails dos proprietários, separados por vírgula. |
+| `SAMBU_ADMIN_EMAILS` | Opcional; substitui `ADMIN_EMAILS` nos recursos do beta. Prefira manter somente `ADMIN_EMAILS` para também manter o Studio alinhado. |
+| `SAMBU_ADMIN_TESTER_EMAILS` | Opcional; operadores convidados de livros, sem acesso ao backup/master. |
+| `SAMBU_BETA_OPEN` | `false` para lista fechada; padrão `true` permite contas cadastradas. |
+| `SAMBU_BETA_EMAILS` | Lista de leitores convidados quando o beta está fechado. |
+
+O proprietário precisa definir/desbloquear a senha master pelo painel. O cadastro e a confirmação de e-mail seguem a configuração do Supabase Auth. Mantenha HTTPS para os cookies seguros. Configure no Supabase o domínio da homologação e depois o definitivo.
+
+## Homologação antes do merge
+
+1. Faça um backup completo do PostgreSQL e do bucket atual. Confirme recuperação em ambiente separado.
+2. Crie um serviço separado no Easypanel apontando para esta branch, com banco e bucket de homologação. Não reutilize os dados de produção para testar exclusões/importações.
+3. Confirme que as migrações existentes `0000`, `0001` e `0002` estão aplicadas. Em uma instalação nova, aplique-as em ordem pelo SQL Editor/psql antes do passo seguinte.
+4. Build pelo Dockerfile, porta interna 3000. O container inclui o comando de migração. Pelo console do container, execute:
+
+   ```sh
+   node scripts/migrate-vps.mjs
+   ```
+
+   Em um checkout com dependências e `DATABASE_URL` configurada, o equivalente é `npm run db:migrate:vps`. A saída será `applied` ou `already_applied`. O comando não apaga tabelas e rejeita uma base sem os pré-requisitos. Não aplique a mesma migração também por outro runner.
+5. Valide cadastro, confirmação de e-mail, login, renovação de sessão, nome/perfil e saída. Um leitor comum não deve acessar administração.
+6. Importe um EPUB e um PDF, revise e publique. Confira capa, leitura, progresso, favoritos e busca. Confirme que o bucket privado bloqueia acesso público direto.
+7. Abra o mesmo EPUB em desktop e celular com a mesma conta; avance, feche, retome no outro e tente uma gravação atrasada. Confira também fonte, capítulos, voltar/avançar e conexão lenta.
+8. Confirme no Storage real respostas HEAD com ETag/tamanho e GET com Range (206). O adaptador recusa ignorar o intervalo para evitar baixar todo o livro a cada capítulo. Valide os limites/tipos permitidos do bucket: EPUB, PDF, imagens, JSON e application/octet-stream para caches e partes; máximo do app: EPUB 32 MB, PDF 250 MB, sujeito aos limites do plano do Supabase/proxy.
+9. Envie avaliação/relato e confira o painel; baixe o backup. Só depois marque o PR como pronto e faça o merge. Na produção, aplique a migração antes de encaminhar tráfego à versão nova.
+
+## Backup e reversão
+
+O ZIP administrativo tem formato `sambu-postgres-backup-v1`, com snapshot JSON e arquivos. Não use o restaurador SQLite do Sites. O teste automatizado restaura as linhas numa instância PostgreSQL isolada e verifica arquivos; isso não substitui validar recuperação no Supabase real. Para recuperação operacional completa, mantenha `pg_dump`/backup do provedor e cópia do bucket, incluindo identidades Auth e configuração fora do ZIP. O ZIP é limitado a 5.000 linhas por tabela, 200 arquivos-base e 250 MB; caches por capítulo são regeneráveis. Uploads sem referência precisam de retenção/limpeza operacional.
+
+Para reverter o aplicativo, reimplante a imagem anterior. As novas colunas/tabelas podem permanecer; não reverta o banco apagando-as. A versão anterior só grava porcentagem, portanto, se ela for usada para novas leituras, planeje a reconciliação desse progresso antes de retornar ao beta.
+
+## Validação desta branch
+
+`npm test`: TypeScript + testes de cliente/leitor + integração com PostgreSQL PGlite. Abrange permissões, publicação concorrente, importação, migração/reexecução preservando dados, sincronização, 4.000 parágrafos carregados por capítulo, feedback, avaliações, métricas, backup e adaptação de Storage com HTTP simulado.
+
+`npm run build:vps`: gera `dist/standalone`. Smoke local confirmou `/login` (200), `/api/session` (200), `/api/progress` sem sessão (401) e logo (200). Docker não está disponível no ambiente de desenvolvimento; o workflow `.github/workflows/vps.yml` executa o build da imagem no GitHub.
+
+Ainda exigem homologação: Docker no CI, Supabase Auth/Storage reais, dados reais, proxy/HTTPS do Easypanel e teste visual no celular físico. Nenhuma migração foi executada na VPS durante a preparação deste PR.

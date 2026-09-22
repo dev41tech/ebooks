@@ -1,3056 +1,239 @@
 "use client";
+import BetaDashboard from './components/beta-dashboard';
+import EditorialCheck from './components/editorial-check';
+import {trackReading} from './lib/telemetry';
+import PilotGuide from "./components/pilot-guide";
+import Reader from "./components/reader";
+import {loadReaderPage} from "./lib/reader-client";
+import type {ReaderPage} from "./lib/reader-content";
+import { cleanReaderProfile, type ReaderProfile } from "./lib/reader-profile";
+import { apiFetch, serviceUrl } from "./lib/client-api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { useEffect, useMemo, useState } from "react";
-import Producao from "./studio-ia";
-
-type User = { name: string; email: string } | null;
-type View =
-  | "home"
-  | "catalog"
-  | "library"
-  | "detail"
-  | "reader"
-  | "plans"
-  | "profile"
-  | "studio"
-  | "admin"
-  | "producao";
-type Chapter = {
-  id: string;
-  number: number;
-  title: string;
-  minutes: number;
-  free: boolean;
-  body: string[];
-};
-type Book = {
-  id: string;
-  slug: string;
-  title: string;
-  subtitle: string;
-  author: string;
-  authorId: string;
-  genre: string;
-  trope: string;
-  format: string;
-  ageRating: string;
-  language: string;
-  blurb: string;
-  score: number;
-  ratings: number;
-  reads: string;
-  progress: number;
-  color: string;
-  accent: string;
-  status: string;
-  price: number;
-  subscribersOnly: boolean;
-  tags: string[];
-  chapters: Chapter[];
-  contentLoaded?: boolean;
-  freeChapters?: number;
-  coverUrl?: string;
-};
-
-const MOOD_FILTERS = [
-  { label: "Quero me apaixonar", icon: "♥", genre: "Romance", query: "" },
-  { label: "Preciso recomeçar", icon: "↻", genre: "Todos", query: "recomeço" },
-  { label: "Uma história intensa", icon: "⚡", genre: "Suspense", query: "" },
-  { label: "Leitura leve", icon: "☀", genre: "Contemporâneo", query: "" },
-] as const;
-
-const CURATED_COVERS: Record<string, string> = {
-  "mar-de-dentro": "/covers/o-mar-de-dentro.webp",
-  "arquivo-das-estrelas": "/covers/o-arquivo-das-estrelas.webp",
-  "sete-minutos": "/covers/sete-minutos.webp",
-  "cafeteria-domingo": "/covers/a-cafeteria-de-domingo.webp",
-  "codigo-aurora": "/covers/codigo-aurora.webp",
-  "depois-da-chuva": "/covers/depois-da-chuva.webp",
-  "cartas-para-mim": "/covers/cartas-para-mim.webp",
-  "jardim-inverno": "/covers/jardim-de-inverno.webp",
-  "entre-linhas": "/covers/entre-linhas.webp",
-  "domingo-em-paris": "/covers/domingo-em-paris.webp",
-  "abd7c45b-3bce-49a5-9721-472aaf7a1a9a":
-    "/covers/alcoolismo-marcos-dias.png",
-};
-
-const EDITORIAL_COVER_IDS = new Set([
-  "mar-de-dentro",
-  "arquivo-das-estrelas",
-  "sete-minutos",
-  "cafeteria-domingo",
-  "codigo-aurora",
-  "depois-da-chuva",
-  "cartas-para-mim",
-  "jardim-inverno",
-  "entre-linhas",
-  "domingo-em-paris",
-]);
-
-function coverUrlFor(bookId: string) {
-  return (
-    CURATED_COVERS[bookId] ||
-    `/api/catalog/cover?id=${encodeURIComponent(bookId)}`
-  );
+export type User = { name: string; email: string; admin: boolean; participant: boolean; adminTrial?:boolean } | null;
+type View = "home" | "catalog" | "library" | "detail" | "reader" | "profile" | "admin" | "guide";
+type Book = { id: string; title: string; author: string; genre: string; categoryMain?:string|null; categoriesSecondary?:string[]|null; description: string; format?: string; status: string; publishedAt?: string; coverKey?: string; language?: string; };
+type Location = { position: number; progress: number; revision?:number };
+type ApiPayload = { recommendations?:{bookId:string;reason:string}[]; configured?:boolean; unlocked?:boolean; error?: string; message?: string; books?: Book[]; profile?: { displayName?: string; tasteProfile?:ReaderProfile }; favorites?: string[]; locations?: Record<string,Location>; batches?: ImportBatch[]; items?: StagedBook[]; uploadId?: string; chunkSize?: number; batch: { validItems:number; errorItems:number }; publishedBookId?:string; storageKey?:string; fileName?:string; contentType?:string; fileSize?:number };
+const searchText=(value:string)=>value.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLocaleLowerCase("pt-BR").trim().replace(/\s+/g," ");
+const NAV: { id: View; label: string }[] = [{id:"home",label:"Início"},{id:"catalog",label:"Explorar"},{id:"library",label:"Minha biblioteca"}];
+const messages: Record<string,string> = { title_confirmation_required:"Digite exatamente o título atual do ebook para confirmar.", master_required:"Digite a senha master para abrir a administração.", master_password_length:"Use uma senha entre 12 e 128 caracteres.", master_invalid_password:"Senha master incorreta.", master_rate_limited:"Muitas tentativas. Aguarde 15 minutos antes de tentar novamente.", master_already_configured:"A senha master já foi criada. Recarregue a página e entre com ela.", master_setup_required:"Crie a senha master no primeiro acesso.", sign_in_required:"Entre na sua conta para continuar.", invitation_required:"Esta conta ainda não está na lista de participantes do beta.", admin_required:"Esta área é exclusiva da administração.", invalid_book_content:"O arquivo não pôde ser lido. Confira o EPUB (até 32 MB) ou PDF antes de publicar.", review_required:"Publique esta obra pela revisão da importação.", published_import_protected:"Esta importação possui uma obra vinculada. Seus arquivos estão protegidos.", book_file_required:"Selecione um arquivo válido para o livro.", review_incomplete:"Confira os dados e confirme os direitos para publicar." };
+async function requestJson(url: string, options?: RequestInit) {
+  const response = await apiFetch(url, options);
+  const data = await response.json().catch(() => ({error:"invalid_response"})) as ApiPayload;
+  if(data.error === "master_required") window.dispatchEvent(new Event("sambu-master-locked"));
+  if (!response.ok || data.error) throw new Error(messages[data.error || ""] || data.message || "Não foi possível concluir. Tente novamente.");
+  return data;
 }
-
-const BOOKS: Book[] = [
-  {
-    id: "mar-de-dentro",
-    slug: "o-mar-de-dentro",
-    title: "O Mar de Dentro",
-    subtitle: "Às vezes, voltar é a única forma de seguir",
-    author: "Lia Montenegro",
-    authorId: "aut_001",
-    genre: "Romance",
-    trope: "Recomeços",
-    format: "Série",
-    ageRating: "14",
-    language: "pt-BR",
-    blurb:
-      "Aos quarenta, Marina retorna à ilha onde aprendeu a ir embora — e encontra uma carta que muda a história de sua família.",
-    score: 4.9,
-    ratings: 2384,
-    reads: "12,4 mil",
-    progress: 38,
-    color: "#173d3a",
-    accent: "#f0bf8d",
-    status: "Publicado",
-    price: 24.9,
-    subscribersOnly: false,
-    tags: ["recomeço", "família", "ilha"],
-    chapters: [
-      {
-        id: "cap_001",
-        number: 1,
-        title: "O retorno",
-        minutes: 8,
-        free: true,
-        body: [
-          "A ilha aparecia devagar, recortada pela manhã como uma lembrança que ainda não decidira se queria voltar. Marina apoiou a testa no vidro do ferry e contou as casas brancas no morro.",
-          "Havia vinte anos que não fazia aquele caminho. Ainda assim, seu corpo reconheceu primeiro: o cheiro de sal, o balanço curto, o sino do porto.",
-        ],
-      },
-      {
-        id: "cap_002",
-        number: 2,
-        title: "A carta",
-        minutes: 7,
-        free: true,
-        body: [
-          "A chave estava sob o vaso azul, exatamente onde sua mãe dizia que esconder chaves era o mesmo que não escondê-las.",
-          "Sobre a mesa, uma carta levava apenas seu nome — Marina — na caligrafia inclinada do pai.",
-        ],
-      },
-      {
-        id: "cap_003",
-        number: 3,
-        title: "O farol",
-        minutes: 9,
-        free: false,
-        body: [
-          "O farol acendeu antes do pôr do sol. Na ilha, aquele era sempre um aviso.",
-        ],
-      },
-    ],
-  },
-  {
-    id: "arquivo-das-estrelas",
-    slug: "arquivo-das-estrelas",
-    title: "O Arquivo das Estrelas",
-    subtitle: "Toda memória deixa uma constelação",
-    author: "Caio Sambre",
-    authorId: "aut_002",
-    genre: "Fantasia",
-    trope: "Segredo ancestral",
-    format: "Ebook + áudio",
-    ageRating: "12",
-    language: "pt-BR",
-    blurb:
-      "Uma arquivista descobre que cada constelação guarda uma memória proibida do seu povo.",
-    score: 4.8,
-    ratings: 1621,
-    reads: "9,8 mil",
-    progress: 0,
-    color: "#2b2343",
-    accent: "#d7b3ff",
-    status: "Publicado",
-    price: 19.9,
-    subscribersOnly: true,
-    tags: ["magia", "mistério", "aventura"],
-    chapters: [
-      {
-        id: "cap_101",
-        number: 1,
-        title: "Lume",
-        minutes: 10,
-        free: true,
-        body: [
-          "Na cidade de Lume, as estrelas eram catalogadas antes de receberem nomes.",
-          "Íris sabia o número de cada uma, mas nunca ousara perguntar quem decidia quais memórias seriam apagadas.",
-        ],
-      },
-    ],
-  },
-  {
-    id: "sete-minutos",
-    slug: "sete-minutos",
-    title: "Sete Minutos",
-    subtitle: "O relógio para. O crime começa.",
-    author: "Nina Valença",
-    authorId: "aut_003",
-    genre: "Suspense",
-    trope: "Tempo limitado",
-    format: "Série imersiva",
-    ageRating: "16",
-    language: "pt-BR",
-    blurb:
-      "Toda noite, às 02h17, o relógio para. Clara tem sete minutos para impedir um crime que ainda não aconteceu.",
-    score: 4.7,
-    ratings: 918,
-    reads: "7,1 mil",
-    progress: 0,
-    color: "#542a2c",
-    accent: "#ffb099",
-    status: "Publicado",
-    price: 29.9,
-    subscribersOnly: true,
-    tags: ["crime", "tempo", "mistério"],
-    chapters: [
-      {
-        id: "cap_201",
-        number: 1,
-        title: "02h17",
-        minutes: 7,
-        free: true,
-        body: [
-          "O primeiro silêncio aconteceu às duas e dezessete.",
-          "Não foi ausência de ruído, mas a sensação de que o mundo inteiro prendia a respiração.",
-        ],
-      },
-    ],
-  },
-  {
-    id: "cafeteria-domingo",
-    slug: "a-cafeteria-de-domingo",
-    title: "A Cafeteria de Domingo",
-    subtitle: "Ninguém toma café sozinho",
-    author: "Tomás Rios",
-    authorId: "aut_004",
-    genre: "Contemporâneo",
-    trope: "Found family",
-    format: "Ebook",
-    ageRating: "Livre",
-    language: "pt-BR",
-    blurb:
-      "Cinco desconhecidos, uma mesa compartilhada e a coragem de começar de novo.",
-    score: 4.6,
-    ratings: 773,
-    reads: "5,6 mil",
-    progress: 72,
-    color: "#65442c",
-    accent: "#ffd3a3",
-    status: "Publicado",
-    price: 14.9,
-    subscribersOnly: false,
-    tags: ["amizade", "café", "acolhimento"],
-    chapters: [
-      {
-        id: "cap_301",
-        number: 1,
-        title: "Mesa seis",
-        minutes: 6,
-        free: true,
-        body: [
-          "A mesa seis tinha cinco cadeiras incompatíveis e uma regra escrita a giz: aos domingos, ninguém toma café sozinho.",
-        ],
-      },
-    ],
-  },
-  {
-    id: "codigo-aurora",
-    slug: "codigo-aurora",
-    title: "Código Aurora",
-    subtitle: "A última mensagem da Terra",
-    author: "Yara Nascimento",
-    authorId: "aut_005",
-    genre: "Ficção científica",
-    trope: "Rivais aliados",
-    format: "Audiobook",
-    ageRating: "14",
-    language: "pt-BR",
-    blurb:
-      "Dois pesquisadores rivais precisam decifrar a última mensagem enviada pela Terra.",
-    score: 4.8,
-    ratings: 1104,
-    reads: "8,2 mil",
-    progress: 0,
-    color: "#19344d",
-    accent: "#88dce8",
-    status: "Publicado",
-    price: 27.9,
-    subscribersOnly: true,
-    tags: ["espaço", "futuro", "rivals"],
-    chapters: [
-      {
-        id: "cap_401",
-        number: 1,
-        title: "A mensagem",
-        minutes: 11,
-        free: true,
-        body: [
-          "A mensagem levou oito anos para chegar e apenas três segundos para destruir todas as certezas de Aurora.",
-        ],
-      },
-    ],
-  },
-  {
-    id: "depois-da-chuva",
-    slug: "depois-da-chuva",
-    title: "Depois da Chuva",
-    subtitle: "Toda despedida deixa uma janela aberta",
-    author: "Helena Prado",
-    authorId: "aut_006",
-    genre: "Romance",
-    trope: "Segunda chance",
-    format: "Ebook + áudio",
-    ageRating: "14",
-    language: "pt-BR",
-    blurb:
-      "Uma fotógrafa retorna a Curitiba para vender a casa da família e reencontra o amor que deixou esperando.",
-    score: 4.9,
-    ratings: 684,
-    reads: "4,7 mil",
-    progress: 0,
-    color: "#3d2949",
-    accent: "#f47fb6",
-    status: "Publicado",
-    price: 22.9,
-    subscribersOnly: true,
-    tags: ["segunda chance", "Curitiba", "família"],
-    chapters: [
-      {
-        id: "cap_501",
-        number: 1,
-        title: "A casa vazia",
-        minutes: 8,
-        free: true,
-        body: [
-          "A chuva desenhava caminhos no vidro quando Elisa reconheceu a rua onde aprendera a partir.",
-        ],
-      },
-    ],
-  },
-  {
-    id: "cartas-para-mim",
-    slug: "cartas-para-mim",
-    title: "Cartas Para Mim",
-    subtitle: "A mulher que você será já conhece o caminho",
-    author: "Beatriz Luz",
-    authorId: "aut_007",
-    genre: "Contemporâneo",
-    trope: "Autodescoberta",
-    format: "Ebook",
-    ageRating: "Livre",
-    language: "pt-BR",
-    blurb:
-      "Aos cinquenta, Clara encontra cartas que escreveu para si mesma durante três décadas.",
-    score: 4.8,
-    ratings: 591,
-    reads: "4,1 mil",
-    progress: 0,
-    color: "#6a3048",
-    accent: "#ffc36e",
-    status: "Publicado",
-    price: 17.9,
-    subscribersOnly: false,
-    tags: ["autoestima", "maturidade", "recomeço"],
-    chapters: [
-      {
-        id: "cap_601",
-        number: 1,
-        title: "A caixa",
-        minutes: 7,
-        free: true,
-        body: [
-          "A caixa estava no alto do armário, atrás dos vestidos que Clara já não usava.",
-        ],
-      },
-    ],
-  },
-  {
-    id: "jardim-inverno",
-    slug: "jardim-de-inverno",
-    title: "Jardim de Inverno",
-    subtitle: "Algumas sementes esperam anos",
-    author: "Maya Torres",
-    authorId: "aut_008",
-    genre: "Romance",
-    trope: "Amor maduro",
-    format: "Série",
-    ageRating: "14",
-    language: "pt-BR",
-    blurb:
-      "Duas vidas interrompidas se encontram num curso de jardinagem e descobrem que ainda há tempo.",
-    score: 4.7,
-    ratings: 488,
-    reads: "3,8 mil",
-    progress: 0,
-    color: "#25443a",
-    accent: "#d8db75",
-    status: "Publicado",
-    price: 19.9,
-    subscribersOnly: true,
-    tags: ["amor maduro", "bem-estar", "natureza"],
-    chapters: [
-      {
-        id: "cap_701",
-        number: 1,
-        title: "Terra nova",
-        minutes: 9,
-        free: true,
-        body: [
-          "Teresa não acreditava em recomeços, mas acreditava em terra bem cuidada.",
-        ],
-      },
-    ],
-  },
-  {
-    id: "entre-linhas",
-    slug: "entre-linhas",
-    title: "Entre Linhas",
-    subtitle: "O segredo mora no que não foi escrito",
-    author: "Sofia Brandão",
-    authorId: "aut_009",
-    genre: "Suspense",
-    trope: "Segredo de família",
-    format: "Série imersiva",
-    ageRating: "16",
-    language: "pt-BR",
-    blurb:
-      "Uma editora encontra mensagens escondidas no manuscrito de uma autora desaparecida.",
-    score: 4.8,
-    ratings: 726,
-    reads: "5,2 mil",
-    progress: 0,
-    color: "#20243d",
-    accent: "#bd8cff",
-    status: "Publicado",
-    price: 26.9,
-    subscribersOnly: true,
-    tags: ["mistério", "livros", "segredo"],
-    chapters: [
-      {
-        id: "cap_801",
-        number: 1,
-        title: "O manuscrito",
-        minutes: 8,
-        free: true,
-        body: [
-          "Na página quarenta e três havia uma frase que não estava no arquivo original.",
-        ],
-      },
-    ],
-  },
-  {
-    id: "domingo-em-paris",
-    slug: "domingo-em-paris",
-    title: "Domingo em Paris",
-    subtitle: "Uma viagem pode durar uma vida",
-    author: "Laura Meireles",
-    authorId: "aut_010",
-    genre: "Romance",
-    trope: "Viagem transformadora",
-    format: "Audiobook",
-    ageRating: "Livre",
-    language: "pt-BR",
-    blurb:
-      "Uma brasileira viaja sozinha pela primeira vez e aceita um convite que muda seus planos.",
-    score: 4.6,
-    ratings: 352,
-    reads: "2,9 mil",
-    progress: 0,
-    color: "#62353c",
-    accent: "#ffd59c",
-    status: "Publicado",
-    price: 21.9,
-    subscribersOnly: false,
-    tags: ["viagem", "liberdade", "romance"],
-    chapters: [
-      {
-        id: "cap_901",
-        number: 1,
-        title: "A passagem",
-        minutes: 6,
-        free: true,
-        body: [
-          "Lúcia comprou a passagem numa terça-feira, antes que a coragem tivesse tempo de desaparecer.",
-        ],
-      },
-    ],
-  },
-];
-const NAV: { id: View; label: string }[] = [
-  { id: "home", label: "Início" },
-  { id: "catalog", label: "Explorar" },
-  { id: "library", label: "Minha biblioteca" },
-  { id: "studio", label: "Studio do autor" },
-  // "Produzir com IA" saiu do menu por ora. A view e o componente continuam
-  // montados abaixo, entao devolver o item a esta lista basta para reativar.
-  // { id: "producao", label: "Produzir com IA" },
-];
-
-function Icon({ name }: { name: string }) {
-  const g: Record<string, string> = {
-    search: "⌕",
-    home: "⌂",
-    book: "▤",
-    headphones: "◉",
-    user: "○",
-    bell: "◌",
-    play: "▶",
-    lock: "▣",
-  };
-  return <span aria-hidden="true">{g[name] || "•"}</span>;
+function Cover({book}:{book:Book}) {
+  const [failed,setFailed] = useState(false);
+  useEffect(()=>setFailed(false),[book.id]);
+  return <div className="beta-cover">{failed ? <span>{book.title}<small>{book.author}</small></span> : <img src={serviceUrl(`/api/catalog/cover?id=${encodeURIComponent(book.id)}`)} alt={`Capa de ${book.title}`} loading="lazy" onError={()=>setFailed(true)}/>}</div>;
 }
-
-function Cover({ book, large = false }: { book: Book; large?: boolean }) {
-  const resolvedCoverUrl = book.coverUrl || CURATED_COVERS[book.id];
-  return (
-    <div
-      className={`cover ${large ? "cover-large" : ""} ${EDITORIAL_COVER_IDS.has(book.id) ? "cover-art-overlay" : ""}`}
-      style={{
-        background: `radial-gradient(circle at 70% 25%,${book.accent}45,transparent 32%),linear-gradient(145deg,${book.color},#101114)`,
-      }}
-    >
-      {resolvedCoverUrl && (
-        <>
-          {/* Dynamic catalog images come from the protected cover endpoint. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            className="cover-image"
-            src={resolvedCoverUrl}
-            alt={`Capa de ${book.title}`}
-            loading={large ? "eager" : "lazy"}
-          />
-        </>
-      )}
-      <span className="cover-mark">S</span>
-      <div>
-        <small>{book.genre}</small>
-        <strong>{book.title}</strong>
-        <em>{book.author}</em>
-      </div>
-      <i style={{ background: book.accent }} />
-    </div>
-  );
+function BookCard({book,onOpen,onFavorite,saved}:{book:Book;onOpen:()=>void;onFavorite:()=>void;saved:boolean}) {
+  return <article className="book-card beta-card"><button className="book-open" onClick={onOpen}><Cover book={book}/><h3>{book.title}</h3><p>{book.author}</p><small>{book.genre}</small></button><button className="favorite-control" aria-label={`${saved ? "Remover dos" : "Adicionar aos"} favoritos: ${book.title}`} aria-pressed={saved} onClick={onFavorite}>{saved ? "♥" : "♡"}</button></article>;
 }
-
-function Field({
-  label,
-  name,
-  type = "text",
-  placeholder,
-  children,
-  required = false,
-}: {
-  label: string;
-  name: string;
-  type?: string;
-  placeholder?: string;
-  children?: React.ReactNode;
-  required?: boolean;
-}) {
-  return (
-    <label className="field">
-      <span>
-        {label}
-        {required && <b> *</b>}
-      </span>
-      {children || <input name={name} type={type} placeholder={placeholder} />}
-      <small>{name}</small>
-    </label>
-  );
-}
-
-export default function SambuApp({ user }: { user: User }) {
-  const [view, setView] = useState<View>(() => {
-      if (typeof window === "undefined") return "home";
-      return new URLSearchParams(window.location.search).get("view") ===
-        "catalog"
-        ? "catalog"
-        : "home";
-    }),
-    [catalogBooks, setCatalogBooks] = useState<Book[]>(BOOKS),
-    [selected, setSelected] = useState(BOOKS[0]),
-    [chapter, setChapter] = useState(0),
-    [query, setQuery] = useState(() => {
-      if (typeof window === "undefined") return "";
-      return new URLSearchParams(window.location.search).get("search") || "";
-    }),
-    [genre, setGenre] = useState("Todos"),
-    [discoveryMood, setDiscoveryMood] = useState(""),
-    [theme, setTheme] = useState<"light" | "sepia" | "dark">("sepia"),
-    [fontSize, setFontSize] = useState(20),
-    [saved, setSaved] = useState<Record<string, number>>({
-      "cafeteria-domingo": 72,
-      "mar-de-dentro": 38,
-    }),
-    [favoriteIds, setFavoriteIds] = useState<string[]>([]),
-    [toast, setToast] = useState(""),
-    [studioTab, setStudioTab] = useState("obra");
-  const results = useMemo(
-    () =>
-      catalogBooks.filter(
-        (b) =>
-          (genre === "Todos" || b.genre === genre) &&
-          (b.title + b.author + b.genre + b.trope + b.tags.join(" "))
-            .toLowerCase()
-            .includes(query.toLowerCase()),
-      ),
-    [catalogBooks, query, genre],
-  );
-  useEffect(() => {
-    fetch("/api/progress")
-      .then((r) => (r.ok ? r.json() : {}))
-      .then((d: { progress?: Record<string, number> }) => {
-        if (d.progress) setSaved((s) => ({ ...s, ...d.progress }));
-      })
-      .catch(() => {});
-    fetch("/api/favorites")
-      .then((r) => (r.ok ? r.json() : { favorites: [] }))
-      .then((data) => setFavoriteIds(data.favorites || []))
-      .catch(() => {});
-    fetch("/api/catalog")
-      .then((r) => (r.ok ? r.json() : { books: [] }))
-      .then((data) => {
-        const imported: Book[] = (data.books || []).map(
-          (book: Record<string, unknown>, index: number) => ({
-            id: String(book.id),
-            slug: String(book.slug || book.id),
-            title: String(book.title || "Sem título"),
-            subtitle: String(book.subtitle || "Nova história no acervo Sambu"),
-            author: String(book.author || "Autor desconhecido"),
-            authorId: String(book.authorId || "imported"),
-            genre: String(book.genre || "Literatura"),
-            trope: "Novidade",
-            format: String(book.format || "Ebook"),
-            ageRating: String(book.ageRating || "14"),
-            language: String(book.language || "pt-BR"),
-            blurb: String(
-              book.description || "Livro recém-publicado no Sambu.",
-            ),
-            score: 5,
-            ratings: 0,
-            reads: "Novo",
-            progress: 0,
-            color: ["#3b174d", "#173d3a", "#4f233c"][index % 3],
-            accent: ["#ed008c", "#ffb51b", "#9400ff"][index % 3],
-            status: "Publicado",
-            price: Number(book.priceCents || 0) / 100,
-            subscribersOnly: Boolean(book.subscribersOnly),
-            freeChapters: Number(book.freeChapters || 1),
-            coverUrl: coverUrlFor(String(book.id)),
-            tags: ["novidade", "ebook", String(book.genre || "literatura")],
-            contentLoaded: false,
-            chapters: [
-              {
-                id: `${book.id}-arquivo`,
-                number: 1,
-                title: "Conteúdo do EPUB",
-                minutes: 1,
-                free: true,
-                body: ["Carregando o conteúdo original do ebook…"],
-              },
-            ],
-          }),
-        );
-        setCatalogBooks((current) => [
-          ...imported,
-          ...current.filter((item) => !imported.some((b) => b.id === item.id)),
-        ]);
-      })
-      .catch(() => {});
-  }, []);
-
-  function go(next: View) {
-    setView(next);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-  function discoverByMood(mood: (typeof MOOD_FILTERS)[number]) {
-    setDiscoveryMood(mood.label);
-    setGenre(mood.genre);
-    setQuery(mood.query);
-    go("catalog");
-  }
-  function clearDiscovery() {
-    setDiscoveryMood("");
-    setGenre("Todos");
-    setQuery("");
-  }
-  async function openBook(book: Book) {
-    let resolved = book;
-    if (
-      book.authorId === "imported" &&
-      !book.contentLoaded &&
-      !book.format.toUpperCase().includes("PDF")
-    ) {
-      notify("Abrindo o conteúdo original do EPUB…");
-      const response = await fetch(
-        `/api/catalog/content?id=${encodeURIComponent(book.id)}`,
-      );
-      const data = await response.json().catch(() => ({}));
-      if (response.ok && data.chapters?.length) {
-        resolved = { ...book, chapters: data.chapters, contentLoaded: true };
-        setCatalogBooks((current) =>
-          current.map((item) => (item.id === resolved.id ? resolved : item)),
-        );
-      } else {
-        notify(
-          response.status === 415
-            ? "Este arquivo PDF será aberto no visualizador em uma próxima atualização."
-            : "Não foi possível interpretar o conteúdo deste EPUB.",
-        );
-      }
-    }
-    setSelected(resolved);
-    go("detail");
-  }
-  function notify(m: string) {
-    setToast(m);
-    window.setTimeout(() => setToast(""), 2500);
-  }
-  async function saveProgress(v: number) {
-    setSaved((s) => ({ ...s, [selected.id]: v }));
-    await fetch("/api/progress", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        bookId: selected.id,
-        chapterId: selected.chapters[chapter]?.id,
-        progress: v,
-      }),
-    }).catch(() => {});
-  }
-  async function saveFavorite(bookId: string) {
-    const favorite = !favoriteIds.includes(bookId);
-    const response = await fetch("/api/favorites", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ bookId, favorite }),
-    });
-    if (response.ok)
-      setFavoriteIds((current) =>
-        favorite
-          ? [...new Set([...current, bookId])]
-          : current.filter((id) => id !== bookId),
-      );
-    notify(
-      response.ok
-        ? favorite
-          ? "Livro salvo na sua biblioteca"
-          : "Livro removido dos favoritos"
-        : "Entre na sua conta para salvar histórias",
-    );
-  }
-  async function choosePlan(plan: string) {
-    if (plan === "free" || plan === "individual") {
-      notify("Você já pode aproveitar os capítulos gratuitos");
-      return;
-    }
-    const response = await fetch("/api/subscription", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ plan }),
-    });
-    const data = await response.json().catch(() => ({}));
-    notify(
-      response.ok
-        ? data.message || "Plano selecionado"
-        : "Entre na sua conta para escolher um plano",
-    );
-  }
-  return (
-    <div className="app-shell">
-      {view !== "reader" && (
-        <>
-          <header>
-            <button
-              className="brand"
-              onClick={() => go("home")}
-              aria-label="Ir para a página inicial da Sambu"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/sambu-logo.png" alt="Sambu" />
-            </button>
-            <nav>
-              {NAV.map((x) => (
-                <button
-                  key={x.id}
-                  className={view === x.id ? "active" : ""}
-                  onClick={() => go(x.id)}
-                >
-                  {x.label}
-                </button>
-              ))}
-            </nav>
-            <div className="account">
-              <button className="icon-btn" onClick={() => go("catalog")}>
-                <Icon name="search" />
-              </button>
-              <button className="icon-btn">
-                <Icon name="bell" />
-              </button>
-              <button className="avatar" onClick={() => go("profile")}>
-                {user?.name?.charAt(0).toUpperCase() || "M"}
-              </button>
-            </div>
-          </header>
-          <div className="mobile-tabs">
-            {NAV.slice(0, 3).map((x) => (
-              <button
-                key={x.id}
-                className={view === x.id ? "active" : ""}
-                onClick={() => go(x.id)}
-              >
-                <Icon
-                  name={
-                    x.id === "home"
-                      ? "home"
-                      : x.id === "catalog"
-                        ? "search"
-                        : "book"
-                  }
-                />
-                <span>{x.label}</span>
-              </button>
-            ))}
-            <button onClick={() => go("profile")}>
-              <Icon name="user" />
-              <span>Perfil</span>
-            </button>
-          </div>
-        </>
-      )}
-      {view === "home" && (
-        <Home
-          books={catalogBooks}
-          openBook={openBook}
-          go={go}
-          saved={saved}
-          onDiscover={discoverByMood}
-          discoveryMood={discoveryMood}
-        />
-      )}{" "}
-      {view === "catalog" && (
-        <Catalog
-          query={query}
-          setQuery={setQuery}
-          genre={genre}
-          setGenre={setGenre}
-          discoveryMood={discoveryMood}
-          setDiscoveryMood={setDiscoveryMood}
-          clearDiscovery={clearDiscovery}
-          results={results}
-          openBook={openBook}
-        />
-      )}{" "}
-      {view === "library" && (
-        <Library
-          saved={saved}
-          books={catalogBooks}
-          favoriteIds={favoriteIds}
-          openBook={openBook}
-        />
-      )}{" "}
-      {view === "detail" && (
-        <Detail
-          book={selected}
-          go={go}
-          setChapter={setChapter}
-          notify={notify}
-          saveFavorite={saveFavorite}
-        />
-      )}{" "}
-      {view === "reader" && (
-        <Reader
-          book={selected}
-          chapter={chapter}
-          setChapter={setChapter}
-          go={go}
-          theme={theme}
-          setTheme={setTheme}
-          fontSize={fontSize}
-          setFontSize={setFontSize}
-          notify={notify}
-          saveProgress={saveProgress}
-        />
-      )}{" "}
-      {view === "plans" && <Plans choosePlan={choosePlan} />}{" "}
-      {view === "profile" && <Profile user={user} go={go} notify={notify} />}{" "}
-      {view === "studio" && (
-        <Studio tab={studioTab} setTab={setStudioTab} notify={notify} />
-      )}{" "}
-      {view === "admin" && <AdminV2 go={go} />}{" "}
-      {view === "producao" && <Producao notify={notify} />}{" "}
-      {toast && <div className="toast">✓ {toast}</div>}
-    </div>
-  );
-}
-
-function Home({
-  books,
-  openBook,
-  go,
-  saved,
-  onDiscover,
-  discoveryMood,
-}: {
-  books: Book[];
-  openBook: (b: Book) => void;
-  go: (v: View) => void;
-  saved: Record<string, number>;
-  onDiscover: (mood: (typeof MOOD_FILTERS)[number]) => void;
-  discoveryMood: string;
-}) {
-  const featuredBooks = [...books, ...BOOKS].filter(
-    (book, index, collection) =>
-      collection.findIndex((candidate) => candidate.id === book.id) === index,
-  );
-  const heroBooks = featuredBooks.slice(0, 3);
-
-  return (
-    <main className="home">
-      <div className="discovery-bar">
-        <span>Descubra por:</span>
-        {MOOD_FILTERS.map((mood) => (
-          <button
-            key={mood.label}
-            onClick={() => onDiscover(mood)}
-            className={discoveryMood === mood.label ? "hot" : ""}
-            aria-pressed={discoveryMood === mood.label}
-          >
-            <i aria-hidden="true">{mood.icon}</i>
-            {mood.label}
-          </button>
-        ))}
-      </div>
-      <section className="hero">
-        <div className="hero-copy">
-          <p className="offer-pill">
-            <span>OFERTA DE BOAS-VINDAS</span> 7 dias grátis
-          </p>
-          <h1>
-            Sua próxima história
-            <br />
-            <em>começa aqui.</em>
-          </h1>
-          <p>
-            Romances que abraçam, surpreendem e acompanham o seu momento — para
-            ler ou ouvir, onde você estiver.
-          </p>
-          <div className="hero-actions">
-            <button className="primary" onClick={() => go("plans")}>
-              <Icon name="play" /> Começar grátis
-            </button>
-            <button className="hero-secondary" onClick={() => go("catalog")}>
-              Explorar histórias →
-            </button>
-          </div>
-          <div className="hero-trust">
-            <div>
-              <b>4,9</b>
-              <span>★★★★★</span>
-              <small>avaliação das leitoras</small>
-            </div>
-            <i />
-            <div>
-              <b>50 mil+</b>
-              <small>mulheres lendo juntas</small>
-            </div>
-            <i />
-            <div>
-              <b>Novos</b>
-              <small>capítulos toda semana</small>
-            </div>
-          </div>
-        </div>
-        <div className="hero-stage">
-          <div className="cover-fan back-one">
-            <Cover book={heroBooks[1]} />
-          </div>
-          <div className="cover-fan main-cover">
-            <Cover book={heroBooks[0]} large />
-          </div>
-          <div className="cover-fan back-two">
-            <Cover book={heroBooks[2]} />
-          </div>
-          <div className="float-card audio">
-            <span className="pulse">
-              <Icon name="headphones" />
-            </span>
-            <span>
-              <b>Ouça a história</b>
-              <small>Narração imersiva</small>
-            </span>
-          </div>
-          <div className="float-card pick">
-            NOVO NO
-            <br />
-            <b>ACERVO</b>
-          </div>
-        </div>
-      </section>
-      <section className="content">
-        <Section
-          title="Continue de onde parou"
-          kicker="SUA JORNADA"
-          action={() => go("library")}
-        />
-        <div className="continue-strip">
-          {featuredBooks.filter((b) => saved[b.id]).map((b) => (
-            <article key={b.id} onClick={() => openBook(b)}>
-              <Cover book={b} />
-              <div>
-                <span>{saved[b.id]}% CONCLUÍDO</span>
-                <h3>{b.title}</h3>
-                <p>{b.author}</p>
-                <div className="bar">
-                  <i style={{ width: `${saved[b.id]}%` }} />
-                </div>
-                <small>Continuar leitura →</small>
-              </div>
-            </article>
-          ))}
-        </div>
-        <div className="editorial-head">
-          <div>
-            <p className="eyebrow coral">ESCOLHIDOS PARA VOCÊ</p>
-            <h2>Histórias para se apaixonar</h2>
-          </div>
-          <button onClick={() => go("catalog")}>Ver catálogo completo →</button>
-        </div>
-        <div className="story-rail">
-          {featuredBooks.slice(0, 10).map((b, i) => (
-            <div className="ranked-book" key={b.id}>
-              <span className="rank">0{i + 1}</span>
-              <BookCard book={b} open={openBook} />
-            </div>
-          ))}
-        </div>
-        <section className="audio-banner">
-          <div className="audio-art">
-            <div className="sound-wave">
-              <i />
-              <i />
-              <i />
-              <i />
-              <i />
-              <i />
-              <i />
-            </div>
-            <b>S</b>
-          </div>
-          <div>
-            <p className="eyebrow">SAMBU EM ÁUDIO</p>
-            <h2>Uma história no seu ritmo.</h2>
-            <p>
-              Caminhe, cozinhe ou desacelere enquanto narradores dão vida a cada
-              capítulo.
-            </p>
-          </div>
-          <button className="ivory" onClick={() => openBook(featuredBooks[0])}>
-            <Icon name="headphones" /> Ouvir uma amostra
-          </button>
-        </section>
-        <div className="editorial-head compact">
-          <div>
-            <p className="eyebrow coral">PARA VIRAR A PÁGINA</p>
-            <h2>Recomeços que inspiram</h2>
-          </div>
-          <button onClick={() => go("catalog")}>Ver todos →</button>
-        </div>
-        <div className="quick-picks">
-          {featuredBooks.slice(0, 3).map((b, i) => (
-            <article key={b.id} onClick={() => openBook(b)}>
-              <Cover book={b} />
-              <div>
-                <span>
-                  {
-                    [
-                      "ROMANCE CONTEMPORÂNEO",
-                      "SEGUNDAS CHANCES",
-                      "AMOR & AUTODESCOBERTA",
-                    ][i]
-                  }
-                </span>
-                <h3>{b.title}</h3>
-                <p>{b.blurb}</p>
-                <button>Ler primeiro capítulo →</button>
-              </div>
-            </article>
-          ))}
-        </div>
-        <section className="membership">
-          <div>
-            <p className="eyebrow">SAMBU ILIMITADO</p>
-            <h2>Mais histórias. Mais você.</h2>
-            <p>
-              Catálogo completo, audiobooks, leitura offline e experiências
-              imersivas em uma assinatura simples.
-            </p>
-            <div className="member-actions">
-              <button className="ivory" onClick={() => go("plans")}>
-                Experimentar 7 dias grátis
-              </button>
-              <small>Cancele quando quiser</small>
-            </div>
-          </div>
-          <div className="membership-orbit">
-            <span>♫</span>
-            <span>✦</span>
-            <b>S</b>
-            <span>◉</span>
-          </div>
-        </section>
-      </section>
-    </main>
-  );
-}
-
-function Section({
-  title,
-  kicker,
-  action,
-}: {
-  title: string;
-  kicker: string;
-  action: () => void;
-}) {
-  return (
-    <div className="section-head">
-      <div>
-        <p className="eyebrow coral">{kicker}</p>
-        <h2>{title}</h2>
-      </div>
-      <button onClick={action}>Ver todos →</button>
-    </div>
-  );
-}
-
-function BookCard({ book, open }: { book: Book; open: (b: Book) => void }) {
-  return (
-    <article className="book-card" onClick={() => open(book)}>
-      <div className="cover-wrap">
-        <Cover book={book} />
-        {book.subscribersOnly && <span className="mini-premium">✦</span>}
-        <button>♡</button>
-      </div>
-      <div className="rating">★ {book.score}</div>
-      <h3>{book.title}</h3>
-      <p>{book.author}</p>
-      <span>
-        {book.genre} · {book.format}
-      </span>
-    </article>
-  );
-}
-
-function Catalog({
-  query,
-  setQuery,
-  genre,
-  setGenre,
-  discoveryMood,
-  setDiscoveryMood,
-  clearDiscovery,
-  results,
-  openBook,
-}: {
-  query: string;
-  setQuery: (s: string) => void;
-  genre: string;
-  setGenre: (s: string) => void;
-  discoveryMood: string;
-  setDiscoveryMood: (s: string) => void;
-  clearDiscovery: () => void;
-  results: Book[];
-  openBook: (b: Book) => void;
-}) {
-  return (
-    <main className="page">
-      <div className="page-title">
-        <p className="eyebrow coral">CATÁLOGO SAMBU</p>
-        <h1>Encontre sua próxima história</h1>
-        <p>Busque por título, autora, gênero, tema ou emoção.</p>
-      </div>
-      <div className="search-box">
-        <Icon name="search" />
-        <input
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setDiscoveryMood("");
-          }}
-          placeholder="O que você quer sentir hoje?"
-        />
-        <button onClick={clearDiscovery}>Limpar</button>
-      </div>
-      {discoveryMood && (
-        <div className="active-discovery" role="status">
-          <span>Seleção ativa</span>
-          <b>{discoveryMood}</b>
-          <button onClick={clearDiscovery} aria-label="Remover seleção de descoberta">×</button>
-        </div>
-      )}
-      <div className="filter-row">
-        {[
-          "Todos",
-          "Romance",
-          "Fantasia",
-          "Suspense",
-          "Contemporâneo",
-          "Ficção científica",
-        ].map((x) => (
-          <button
-            key={x}
-            className={genre === x ? "selected" : ""}
-            onClick={() => {
-              setGenre(x);
-              setDiscoveryMood("");
-            }}
-          >
-            {x}
-          </button>
-        ))}
-        <select>
-          <option>Mais relevantes</option>
-          <option>Mais lidos</option>
-          <option>Melhor avaliados</option>
-        </select>
-      </div>
-      <div className="result-count">{results.length} títulos encontrados</div>
-      <div className="book-grid catalog-grid">
-        {results.map((b) => (
-          <BookCard key={b.id} book={b} open={openBook} />
-        ))}
-      </div>
-    </main>
-  );
-}
-
-function Library({
-  saved,
-  books,
-  favoriteIds,
-  openBook,
-}: {
-  saved: Record<string, number>;
-  books: Book[];
-  favoriteIds: string[];
-  openBook: (b: Book) => void;
-}) {
-  const [tab, setTab] = useState<"progress" | "saved" | "completed">(
-    "progress",
-  );
-  const visible = books.filter((book) =>
-    tab === "saved"
-      ? favoriteIds.includes(book.id)
-      : tab === "completed"
-        ? saved[book.id] === 100
-        : saved[book.id] > 0 && saved[book.id] < 100,
-  );
-  return (
-    <main className="page">
-      <div className="page-title row">
-        <div>
-          <p className="eyebrow coral">MINHA BIBLIOTECA</p>
-          <h1>Sua estante, seu ritmo</h1>
-        </div>
-        <button className="outline">Gerenciar downloads</button>
-      </div>
-      <div className="stats-row">
-        <div>
-          <b>
-            {
-              Object.values(saved).filter((value) => value > 0 && value < 100)
-                .length
-            }
-          </b>
-          <span>Em andamento</span>
-        </div>
-        <div>
-          <b>{favoriteIds.length}</b>
-          <span>Salvos</span>
-        </div>
-        <div>
-          <b>{Object.values(saved).filter((value) => value === 100).length}</b>
-          <span>Concluídos</span>
-        </div>
-        <div>
-          <b>{Object.values(saved).reduce((sum, value) => sum + value, 0)}%</b>
-          <span>Tempo de leitura</span>
-        </div>
-      </div>
-      <div className="tabs">
-        <button
-          className={tab === "progress" ? "active" : ""}
-          onClick={() => setTab("progress")}
-        >
-          Em andamento
-        </button>
-        <button
-          className={tab === "saved" ? "active" : ""}
-          onClick={() => setTab("saved")}
-        >
-          Salvos
-        </button>
-        <button
-          className={tab === "completed" ? "active" : ""}
-          onClick={() => setTab("completed")}
-        >
-          Concluídos
-        </button>
-      </div>
-      <div className="library-list">
-        {visible.map((b) => (
-          <article key={b.id}>
-            <Cover book={b} />
-            <div>
-              <span>
-                {b.genre} · {b.format}
-              </span>
-              <h3>{b.title}</h3>
-              <p>{b.author}</p>
-              <div className="bar">
-                <i style={{ width: `${saved[b.id]}%` }} />
-              </div>
-              <small>{saved[b.id]}% concluído</small>
-            </div>
-            <button className="primary" onClick={() => openBook(b)}>
-              Continuar
-            </button>
-            <button className="icon-btn">•••</button>
-          </article>
-        ))}
-        {!visible.length && (
-          <div className="library-empty">
-            <b>Nenhum livro nesta seção</b>
-            <p>Explore o catálogo, salve uma obra ou comece uma leitura.</p>
-          </div>
-        )}
-      </div>
-    </main>
-  );
-}
-
-function Detail({
-  book,
-  go,
-  setChapter,
-  notify,
-  saveFavorite,
-}: {
-  book: Book;
-  go: (v: View) => void;
-  setChapter: (n: number) => void;
-  notify: (s: string) => void;
-  saveFavorite: (id: string) => void;
-}) {
-  return (
-    <main className="detail">
-      <button className="back" onClick={() => go("catalog")}>
-        ← Voltar ao catálogo
-      </button>
-      <section>
-        <div className="detail-cover">
-          <Cover book={book} large />
-          {book.subscribersOnly && (
-            <span className="premium-badge">✦ INCLUSO NO IMERSIVO</span>
-          )}
-        </div>
-        <div className="book-info">
-          <p className="eyebrow coral">
-            {book.genre} · {book.trope}
-          </p>
-          <h1>{book.title}</h1>
-          <h3>{book.subtitle}</h3>
-          <p className="author">
-            por <b>{book.author}</b>
-          </p>
-          <div className="metrics">
-            <span>
-              ★ <b>{book.score}</b>
-              <small>{book.ratings} avaliações</small>
-            </span>
-            <span>
-              <b>{book.reads}</b>
-              <small>leituras</small>
-            </span>
-            <span>
-              <b>{book.chapters.length}</b>
-              <small>capítulos</small>
-            </span>
-            <span>
-              <b>{book.ageRating}</b>
-              <small>classificação</small>
-            </span>
-          </div>
-          <p className="blurb">{book.blurb}</p>
-          <div className="tag-row">
-            {book.tags.map((t) => (
-              <span key={t}>#{t}</span>
-            ))}
-          </div>
-          <div className="actions">
-            <button
-              className="primary"
-              onClick={() => {
-                setChapter(0);
-                go("reader");
-              }}
-            >
-              <Icon name="book" /> Ler agora
-            </button>
-            <button className="outline" onClick={() => saveFavorite(book.id)}>
-              ♡ Salvar
-            </button>
-            <button
-              className="outline"
-              onClick={() => notify("Amostra de áudio iniciada")}
-            >
-              <Icon name="headphones" /> Ouvir amostra
-            </button>
-          </div>
-          <small className="purchase">
-            Compra definitiva por{" "}
-            <b>R$ {book.price.toFixed(2).replace(".", ",")}</b>
-          </small>
-        </div>
-      </section>
-      <div className="chapter-list">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow coral">TEMPORADA 1</p>
-            <h2>Capítulos</h2>
-          </div>
-          <span>
-            {book.chapters.reduce((a, c) => a + c.minutes, 0)} min de leitura
-          </span>
-        </div>
-        {book.chapters.map((c, i) => (
-          <button
-            key={c.id}
-            onClick={() => {
-              setChapter(i);
-              go("reader");
-            }}
-          >
-            <span>{String(c.number).padStart(2, "0")}</span>
-            <div>
-              <b>{c.title}</b>
-              <small>
-                {c.free ? "Acesso gratuito" : "Plano Imersivo ou compra"}
-              </small>
-            </div>
-            <em>{c.minutes} min</em>
-            {!c.free && <Icon name="lock" />}
-            <i>→</i>
-          </button>
-        ))}
-      </div>
-    </main>
-  );
-}
-
-function Reader({
-  book,
-  chapter,
-  setChapter,
-  go,
-  theme,
-  setTheme,
-  fontSize,
-  setFontSize,
-  notify,
-  saveProgress,
-}: {
-  book: Book;
-  chapter: number;
-  setChapter: (n: number) => void;
-  go: (v: View) => void;
-  theme: "light" | "sepia" | "dark";
-  setTheme: (t: "light" | "sepia" | "dark") => void;
-  fontSize: number;
-  setFontSize: (n: number) => void;
-  notify: (s: string) => void;
-  saveProgress: (n: number) => void;
-}) {
-  const c = book.chapters[chapter];
-  const [tocOpen, setTocOpen] = useState(false);
-  const [markedChapters, setMarkedChapters] = useState<number[]>([]);
-  const isPdf = book.format.toUpperCase().includes("PDF");
-  useEffect(() => {
-    fetch(`/api/bookmarks?bookId=${encodeURIComponent(book.id)}`)
-      .then((r) => (r.ok ? r.json() : { bookmarks: [] }))
-      .then((data) =>
-        setMarkedChapters(
-          (data.bookmarks || []).map(
-            (bookmark: { chapter: number }) => bookmark.chapter,
-          ),
-        ),
-      )
-      .catch(() => {});
-  }, [book.id]);
-
-  async function toggleBookmark() {
-    const active = !markedChapters.includes(chapter);
-    const response = await fetch("/api/bookmarks", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        bookId: book.id,
-        chapter,
-        chapterId: c?.id,
-        active,
-      }),
-    });
-    if (response.ok) {
-      setMarkedChapters((current) =>
-        active
-          ? [...current, chapter]
-          : current.filter((item) => item !== chapter),
-      );
-      notify(active ? "Marcador adicionado" : "Marcador removido");
-    } else notify("Entre na sua conta para criar marcadores");
-  }
-  return (
-    <main className={`reader ${theme}`}>
-      <div className="reader-top">
-        <button onClick={() => go("detail")}>←</button>
-        <div>
-          <b>{book.title}</b>
-        </div>
-        <div className="reader-controls">
-          <button onClick={() => setTocOpen((open) => !open)}>☰</button>
-          <button onClick={toggleBookmark}>
-            {markedChapters.includes(chapter) ? "♥" : "♡"}
-          </button>
-          <button onClick={() => setFontSize(Math.max(16, fontSize - 2))}>
-            A−
-          </button>
-          <button onClick={() => setFontSize(Math.min(28, fontSize + 2))}>
-            A+
-          </button>
-          <button
-            onClick={() =>
-              setTheme(
-                theme === "light"
-                  ? "sepia"
-                  : theme === "sepia"
-                    ? "dark"
-                    : "light",
-              )
-            }
-          >
-            ◐
-          </button>
-          <button onClick={() => notify("Preferências de leitura aplicadas")}>
-            ⚙
-          </button>
-        </div>
-      </div>
-      {tocOpen && (
-        <aside className="reader-toc">
-          <div>
-            <b>Índice do livro</b>
-            <button onClick={() => setTocOpen(false)}>×</button>
-          </div>
-          {book.chapters.map((item, index) => (
-            <button
-              key={item.id}
-              className={index === chapter ? "active" : ""}
-              onClick={() => {
-                setChapter(index);
-                setTocOpen(false);
-                window.scrollTo(0, 0);
-              }}
-            >
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <b>{item.title}</b>
-              {markedChapters.includes(index) && <i>♥</i>}
-            </button>
-          ))}
-        </aside>
-      )}
-      <aside className="audio-mini">
-        <button>▶</button>
-        <div>
-          <b>Narração imersiva</b>
-          <small>00:00 / {c?.minutes}:00</small>
-        </div>
-        <span>♫ Efeitos ligados</span>
-      </aside>
-      {isPdf ? (
-        <section className="pdf-reader">
-          <iframe
-            title={`Leitura de ${book.title}`}
-            src={`/api/catalog/file?id=${encodeURIComponent(book.id)}`}
-          />
-          <a
-            className="outline"
-            href={`/api/catalog/file?id=${encodeURIComponent(book.id)}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Abrir PDF em tela cheia
-          </a>
-        </section>
-      ) : (
-        <article style={{ fontSize }}>
-          {c?.body.map((p, i) => (
-            <p key={i}>{p}</p>
-          ))}
-          <div className="reader-end">
-            {chapter < book.chapters.length - 1 ? (
-              <button
-                className="primary"
-                onClick={() => {
-                  saveProgress(
-                    Math.round(((chapter + 1) / book.chapters.length) * 100),
-                  );
-                  setChapter(chapter + 1);
-                  window.scrollTo(0, 0);
-                }}
-              >
-                Continuar leitura →
-              </button>
-            ) : (
-              <button
-                className="primary"
-                onClick={() => {
-                  saveProgress(100);
-                  go("detail");
-                }}
-              >
-                Concluir leitura ✓
-              </button>
-            )}
-          </div>
-        </article>
-      )}
-      <div className="reader-progress">
-        <i
-          style={{ width: `${((chapter + 1) / book.chapters.length) * 100}%` }}
-        />
-      </div>
-    </main>
-  );
-}
-
-function Plans({ choosePlan }: { choosePlan: (plan: string) => void }) {
-  const [annual, setAnnual] = useState(false);
-  return (
-    <main className="page plans">
-      <div className="page-title center">
-        <p className="eyebrow coral">PLANOS SAMBU</p>
-        <h1>Escolha como viver suas histórias</h1>
-        <p>
-          Sem esperas artificiais. Cancele quando quiser. Livros comprados
-          continuam seus.
-        </p>
-      </div>
-      <div className="billing">
-        <button
-          className={!annual ? "active" : ""}
-          onClick={() => setAnnual(false)}
-        >
-          Mensal
-        </button>
-        <button
-          className={annual ? "active" : ""}
-          onClick={() => setAnnual(true)}
-        >
-          Anual <span>economize 33%</span>
-        </button>
-      </div>
-      <div className="plan-grid">
-        <Plan
-          name="Gratuito"
-          price="R$ 0"
-          text="Para descobrir o Sambu"
-          items={[
-            "Capítulos gratuitos",
-            "Progresso sincronizado",
-            "Biblioteca pessoal",
-          ]}
-          onChoose={() => choosePlan("free")}
-        />
-        <Plan
-          featured
-          name="Imersivo"
-          price={annual ? "R$ 19,90" : "R$ 29,90"}
-          text={
-            annual ? "R$ 238,80 cobrados por ano" : "A experiência completa"
-          }
-          items={[
-            "Catálogo ilimitado",
-            "Ebooks e audiobooks",
-            "Leitura offline",
-            "Efeitos imersivos",
-            "Sem anúncios",
-          ]}
-          onChoose={() =>
-            choosePlan(annual ? "immersive_annual" : "immersive_monthly")
-          }
-        />
-        <Plan
-          name="Família"
-          price="R$ 39,90"
-          text="Até quatro perfis"
-          items={[
-            "Todos os benefícios Imersivo",
-            "4 perfis independentes",
-            "Controle parental",
-            "Bibliotecas separadas",
-          ]}
-          onChoose={() => choosePlan("family_monthly")}
-        />
-        <Plan
-          name="Compra avulsa"
-          price="R$ 9,90"
-          text="Preço inicial por ebook"
-          items={[
-            "Livro permanece na biblioteca",
-            "Leitura online e offline",
-            "Sem assinatura obrigatória",
-          ]}
-          onChoose={() => choosePlan("individual")}
-        />
-      </div>
-      <div className="backend-note">
-        <b>✓ Assinatura preparada para integração</b>
-        <span>
-          O plano escolhido será associado à conta e encaminhado ao gateway de
-          pagamento na próxima etapa.
-        </span>
-      </div>
-    </main>
-  );
-}
-
-function Plan({
-  name,
-  price,
-  text,
-  items,
-  featured = false,
-  onChoose,
-}: {
-  name: string;
-  price: string;
-  text: string;
-  items: string[];
-  featured?: boolean;
-  onChoose: () => void;
-}) {
-  return (
-    <article className={`plan ${featured ? "featured" : ""}`}>
-      {featured && <span className="popular">MAIS ESCOLHIDO</span>}
-      <h3>{name}</h3>
-      <p>{text}</p>
-      <div className="price">
-        <b>{price}</b>
-        {price !== "R$ 0" && <span>/mês</span>}
-      </div>
-      <button className={featured ? "primary" : "outline"} onClick={onChoose}>
-        {featured ? "Começar 7 dias grátis" : "Escolher plano"}
-      </button>
-      <ul>
-        {items.map((x) => (
-          <li key={x}>✓ {x}</li>
-        ))}
-      </ul>
-    </article>
-  );
-}
-
-function Profile({
-  user,
-  go,
-  notify,
-}: {
-  user: User;
-  go: (v: View) => void;
-  notify: (s: string) => void;
-}) {
-  type ProfileTab = "personal" | "reading" | "subscription" | "notifications" | "privacy";
-  const [activeTab, setActiveTab] = useState<ProfileTab>("personal");
-  const [saving, setSaving] = useState(false);
-  const [profileName, setProfileName] = useState(user?.name || "Marcos Dias");
-  const [displayName, setDisplayName] = useState(user?.name || "Marcos");
-  const tabs: { id: ProfileTab; label: string; icon: string }[] = [
-    { id: "personal", label: "Dados pessoais", icon: "♙" },
-    { id: "reading", label: "Preferências de leitura", icon: "Aa" },
-    { id: "subscription", label: "Assinatura e compras", icon: "◇" },
-    { id: "notifications", label: "Notificações", icon: "♢" },
-    { id: "privacy", label: "Privacidade e LGPD", icon: "⌁" },
-  ];
-
-  useEffect(() => {
-    fetch("/api/profile")
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (data?.profile?.displayName) {
-          setProfileName(data.profile.displayName);
-          setDisplayName(data.profile.displayName);
+export default function SambuApp({user}:{user:User}) {
+  const [view,setView] = useState<View>("home");
+  const booksRef = useRef<Book[]>([]);
+  const [books,setBooks] = useState<Book[]>([]), [selected,setSelected] = useState<Book|null>(null);
+  const [readerPage,setReaderPage] = useState<ReaderPage|null>(null), [favorites,setFavorites] = useState<string[]>([]);
+  const [libraryLoading,setLibraryLoading]=useState(!!user?.participant),[libraryError,setLibraryError]=useState("");
+  const [locations,setLocations] = useState<Record<string,Location>>({});
+  const [query,setQuery] = useState(""), [genre,setGenre] = useState("Todos"), [sort,setSort] = useState("recent");
+  const [loading,setLoading] = useState(true), [error,setError] = useState(""), [toast,setToast] = useState("");
+  const [openingBookId,setOpeningBookId] = useState<string|null>(null), [favoriteBusy,setFavoriteBusy] = useState(false);
+  const readingBusy=openingBookId!==null;
+  const readingLock=useRef(false);
+  const openingRequest=useRef<AbortController|null>(null);
+  const cancelOpening=useCallback(()=>{
+    openingRequest.current?.abort();openingRequest.current=null;
+    readingLock.current=false;setOpeningBookId(null);
+  },[]);
+  const [theme,setTheme] = useState("sepia"), [font,setFont] = useState(20);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const notify = useCallback((text:string)=>{setToast(text);if(toastTimer.current)clearTimeout(toastTimer.current);toastTimer.current=setTimeout(()=>setToast(""),6000);},[]);
+  const lastSearch=useRef("");
+  const rememberSearch=useCallback((value:string)=>{
+    const query=value.trim().slice(0,100);if(!user?.participant||query.length<2||lastSearch.current===query)return;
+    lastSearch.current=query;
+    requestJson("/api/recommendations",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({query})}).catch(()=>{lastSearch.current="";});
+  },[user?.email,user?.participant]);
+  useEffect(()=>{if(view!=="catalog"||query.trim().length<2)return;const timer=setTimeout(()=>rememberSearch(query),1000);return()=>clearTimeout(timer);},[query,view,rememberSearch]);
+  const navigate = useCallback((next:View,book?:Book)=>{
+    if(next!=="reader")cancelOpening();
+    setView(next); if(book)setSelected(book);
+    const url = new URL(window.location.href);url.search="";url.searchParams.set("view",next);
+    if(book)url.searchParams.set("book",book.id);
+    if (url.href !== window.location.href) window.history.pushState({},"",url);window.scrollTo(0,0);
+  },[cancelOpening]);
+  const load = useCallback(async()=>{
+    setLoading(true);setError("");
+    try { const data=await requestJson("/api/catalog");setBooks(data.books||[]);booksRef.current=data.books||[];return data.books as Book[]; }
+    catch(e){setError((e as Error).message);return null;}
+    finally{setLoading(false);}
+  },[]);
+  const loadLibrary=useCallback(async()=>{
+    if(!user?.participant)return;
+    setLibraryLoading(true);setLibraryError("");
+    try{const [saved,progress]=await Promise.all([requestJson("/api/favorites",{cache:"no-store"}),requestJson("/api/progress",{cache:"no-store"})]);setFavorites(saved.favorites||[]);setLocations(progress.locations||{});}
+    catch{setLibraryError("Não foi possível atualizar sua biblioteca. Suas leituras continuam guardadas na conta.");}
+    finally{setLibraryLoading(false);}
+  },[user?.email,user?.participant]);
+  const startReading = useCallback(async(book:Book)=>{
+    if(!user){notify("Entre na sua conta para ler.");navigate("profile");return;}
+    if(!user.participant){notify(messages.invitation_required);navigate("profile");return;}
+    if(readingLock.current)return;
+    readingLock.current=true;setOpeningBookId(book.id);
+    const controller=new AbortController();openingRequest.current=controller;
+    const timeout=setTimeout(()=>controller.abort(),30000);
+    try {
+      const progress=await requestJson("/api/progress",{cache:"no-store",signal:controller.signal});if(openingRequest.current!==controller)return;setLocations(progress.locations||{});
+      if(book.format?.toUpperCase().includes("PDF")){setReaderPage(null);navigate("reader",book);}
+      else {
+        const location=progress.locations?.[book.id];
+        let page=await loadReaderPage(book.id,{position:location?.position||0},controller.signal);
+        // The previous VPS schema stored percentage only. Upgrade it once on open.
+        if(location&&location.revision===0&&location.progress>0&&location.position===0){
+          const position=Math.floor(Math.max(0,page.totalParagraphs-1)*location.progress/100);
+          if(position>0){page=await loadReaderPage(book.id,{position},controller.signal);if(openingRequest.current!==controller)return;setLocations({...progress.locations,[book.id]:{...location,position}});}
         }
-      })
-      .catch(() => {});
-  }, []);
-
-  function saveLocalPreferences(form: HTMLFormElement, message: string) {
-    const values = Object.fromEntries(new FormData(form).entries());
-    localStorage.setItem(`sambu:${activeTab}`, JSON.stringify(values));
-    notify(message);
-  }
-
-  const sectionTitle = tabs.find((tab) => tab.id === activeTab)?.label;
-
-  return (
-    <main className="page profile">
-      <aside>
-        <div className="profile-summary">
-          <div className="profile-avatar">
-            {profileName?.charAt(0).toUpperCase() || "M"}
-          </div>
-          <div>
-            <h3>{profileName}</h3>
-            <p>{user?.email || "marcos@sambu.online"}</p>
-          </div>
-        </div>
-        <nav className="profile-menu" aria-label="Configurações da conta">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              className={activeTab === tab.id ? "active" : ""}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              <span>{tab.icon}</span>
-              <b>{tab.label}</b>
-              <i>›</i>
-            </button>
-          ))}
-        </nav>
-        <button className="admin-link" onClick={() => go("admin")}>
-          Painel administrativo <span>↗</span>
-        </button>
-      </aside>
-      <section className="panel profile-panel">
-        <div className="panel-head">
-          <div>
-            <p className="eyebrow coral">MINHA CONTA</p>
-            <h2>{sectionTitle}</h2>
-          </div>
-          <span className="status-pill">✓ Conta verificada</span>
-        </div>
-
-        {activeTab === "personal" && (
-          <form
-            className="form-grid"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              setSaving(true);
-              const form = new FormData(e.currentTarget);
-              const response = await fetch("/api/profile", {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({
-                  displayName: form.get("display_name"),
-                  tasteProfile: JSON.stringify(Object.fromEntries(form.entries())),
-                }),
-              }).catch(() => null);
-              setSaving(false);
-              if (response?.ok) {
-                setProfileName(String(form.get("display_name") || form.get("full_name")));
-                notify("Dados pessoais salvos com sucesso");
-              } else notify("Não foi possível salvar. Entre novamente na sua conta.");
-            }}
-          >
-            <Field label="Nome completo" name="full_name" required>
-              <input name="full_name" defaultValue={profileName} required />
-            </Field>
-            <Field label="Nome de exibição" name="display_name">
-              <input
-                name="display_name"
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-              />
-            </Field>
-            <Field label="E-mail" name="email" type="email" required>
-              <input name="email" type="email" value={user?.email || ""} readOnly />
-            </Field>
-            <Field label="Telefone" name="phone" />
-            <Field label="Data de nascimento" name="birth_date" type="date" />
-            <Field label="Idioma" name="locale">
-              <select name="locale">
-                <option value="pt-BR">Português (Brasil)</option>
-                <option value="en-US">English</option>
-              </select>
-            </Field>
-            <Field label="Pronomes" name="pronouns" />
-            <Field label="País" name="country">
-              <select name="country">
-                <option value="BR">Brasil</option>
-                <option value="PT">Portugal</option>
-              </select>
-            </Field>
-            <div className="full form-actions">
-              <button className="primary" disabled={saving}>
-                {saving ? "Salvando…" : "Salvar alterações"}
-              </button>
-              <button type="button" className="outline" onClick={() => notify("Enviamos as instruções de acesso para seu e-mail")}>Alterar acesso</button>
-            </div>
-          </form>
-        )}
-
-        {activeTab === "reading" && (
-          <form className="settings-stack" onSubmit={(e) => { e.preventDefault(); saveLocalPreferences(e.currentTarget, "Preferências de leitura atualizadas"); }}>
-            <div className="setting-card">
-              <div><b>Tema do leitor</b><small>Escolha o conforto visual para suas leituras.</small></div>
-              <select name="reader_theme" defaultValue="sepia"><option value="light">Claro</option><option value="sepia">Sépia</option><option value="dark">Escuro</option></select>
-            </div>
-            <div className="setting-card">
-              <div><b>Tamanho da fonte</b><small>Aplicado automaticamente ao abrir um livro.</small></div>
-              <select name="font_size" defaultValue="20"><option value="16">Pequena</option><option value="20">Média</option><option value="24">Grande</option></select>
-            </div>
-            <div className="setting-card genre-setting">
-              <div><b>Gêneros favoritos</b><small>Melhora as recomendações da sua página inicial.</small></div>
-              <div className="choice-chips"><label><input type="checkbox" name="genre_romance" defaultChecked /> Romance</label><label><input type="checkbox" name="genre_fantasy" /> Fantasia</label><label><input type="checkbox" name="genre_business" defaultChecked /> Negócios</label><label><input type="checkbox" name="genre_thriller" /> Suspense</label></div>
-            </div>
-            <button className="primary settings-save">Salvar preferências</button>
-          </form>
-        )}
-
-        {activeTab === "subscription" && (
-          <div className="settings-stack">
-            <article className="subscription-card">
-              <div><span className="eyebrow">PLANO ATUAL</span><h3>Leitor gratuito</h3><p>Acesso aos capítulos gratuitos e livros liberados.</p></div>
-              <button className="primary" onClick={() => go("plans")}>Conhecer o Sambu+</button>
-            </article>
-            <div className="account-row"><div><b>Forma de pagamento</b><small>Nenhuma forma cadastrada</small></div><button className="outline" onClick={() => go("plans")}>Adicionar</button></div>
-            <div className="account-row"><div><b>Histórico de compras</b><small>Você ainda não realizou compras.</small></div><button className="ghost" onClick={() => notify("Não há comprovantes disponíveis")}>Ver histórico</button></div>
-          </div>
-        )}
-
-        {activeTab === "notifications" && (
-          <form className="settings-stack" onSubmit={(e) => { e.preventDefault(); saveLocalPreferences(e.currentTarget, "Notificações atualizadas"); }}>
-            {[["new_books", "Novos livros e lançamentos", "Avisos quando um título do seu interesse chegar."], ["reading_reminder", "Lembrete de leitura", "Um convite gentil para continuar sua história."], ["promotions", "Ofertas e benefícios", "Descontos, períodos gratuitos e novidades do Sambu+."], ["author_news", "Autores que você acompanha", "Novos capítulos e publicações dos seus favoritos."]].map(([name, title, text], index) => (
-              <label className="toggle-row" key={name}><div><b>{title}</b><small>{text}</small></div><input type="checkbox" name={name} defaultChecked={index < 2} /><span /></label>
-            ))}
-            <button className="primary settings-save">Salvar notificações</button>
-          </form>
-        )}
-
-        {activeTab === "privacy" && (
-          <div className="settings-stack">
-            <div className="privacy-intro"><b>Seus dados, sob seu controle</b><p>Consulte, exporte ou solicite a exclusão dos dados associados à sua conta conforme a LGPD.</p></div>
-            <div className="account-row"><div><b>Baixar meus dados</b><small>Gera uma cópia das informações da conta e do histórico de leitura.</small></div><button className="outline" onClick={() => notify("Solicitação recebida. O arquivo será preparado por e-mail.")}>Solicitar arquivo</button></div>
-            <div className="account-row"><div><b>Personalização da experiência</b><small>Permitir recomendações baseadas no seu histórico.</small></div><label className="mini-toggle"><input type="checkbox" defaultChecked onChange={() => notify("Preferência de privacidade atualizada")} /><span /></label></div>
-            <div className="danger-zone"><div><b>Excluir minha conta</b><small>Essa solicitação inicia a remoção definitiva dos seus dados.</small></div><button className="danger-button" onClick={() => notify("Para sua segurança, enviaremos uma confirmação por e-mail")}>Solicitar exclusão</button></div>
-          </div>
-        )}
-      </section>
-    </main>
-  );
-}
-
-function Studio({
-  tab,
-  setTab,
-  notify,
-}: {
-  tab: string;
-  setTab: (s: string) => void;
-  notify: (s: string) => void;
-}) {
-  const steps = [
-    ["obra", "01", "Dados da obra"],
-    ["conteudo", "02", "Conteúdo"],
-    ["classificacao", "03", "Classificação"],
-    ["midia", "04", "Capa e mídia"],
-    ["comercial", "05", "Comercial"],
-    ["direitos", "06", "Direitos"],
-    ["publicacao", "07", "Publicação"],
-  ];
-  return (
-    <main className="page studio">
-      <div className="page-title row">
-        <div>
-          <p className="eyebrow coral">SAMBU STUDIO</p>
-          <h1>Publique sua próxima história</h1>
-          <p>Campos preparados para o contrato de dados do backend.</p>
-        </div>
-        <div>
-          <button className="outline" onClick={() => notify("Rascunho salvo")}>
-            Salvar rascunho
-          </button>{" "}
-          <button
-            className="primary"
-            onClick={() => notify("Obra enviada para revisão")}
-          >
-            Enviar para revisão
-          </button>
-        </div>
-      </div>
-      <div className="studio-layout">
-        <aside className="step-nav">
-          {steps.map(([id, n, label]) => (
-            <button
-              key={id}
-              className={tab === id ? "active" : ""}
-              onClick={() => setTab(id)}
-            >
-              <span>{n}</span>
-              {label}
-              <i>✓</i>
-            </button>
-          ))}
-        </aside>
-        <section className="panel studio-panel">
-          <StudioForm tab={tab} />
-        </section>
-      </div>
-    </main>
-  );
-}
-
-function StudioForm({ tab }: { tab: string }) {
-  const common: Record<string, string[]> = {
-    obra: [
-      "Título|title",
-      "Subtítulo|subtitle",
-      "Slug|slug",
-      "Tipo de publicação|publication_type",
-      "Idioma original|original_language",
-      "Autor responsável|author_id",
-      "Sinopse curta|short_description",
-      "Sinopse completa|description",
-    ],
-    conteudo: [
-      "Número da temporada|season_number",
-      "Título da temporada|season_title",
-      "Número do capítulo|chapter_number",
-      "Título do capítulo|chapter_title",
-      "Tempo estimado (min)|estimated_minutes",
-      "Disponibilidade|access_type",
-      "Conteúdo estruturado|content_json",
-      "Resumo do capítulo|chapter_summary",
-      "Data de liberação|release_at",
-      "Status editorial|editorial_status",
-    ],
-    classificacao: [
-      "Gênero principal|primary_genre_id",
-      "Gêneros secundários|secondary_genre_ids",
-      "Tropes|trope_ids",
-      "Tags de busca|tags",
-      "Classificação etária|age_rating",
-      "Motivos da classificação|age_rating_reasons",
-      "Avisos de conteúdo|content_warnings",
-      "Emoções predominantes|mood_tags",
-    ],
-    midia: [
-      "Capa principal|cover_asset_id",
-      "Banner horizontal|hero_asset_id",
-      "Arquivo de audiobook|audio_asset_id",
-      "Narrador(a)|narrator_name",
-      "Duração do áudio|audio_duration_seconds",
-      "Trilha sonora|soundtrack_asset_id",
-      "Eventos imersivos|immersive_events_json",
-    ],
-    comercial: [
-      "Modelo de acesso|monetization_model",
-      "Preço de venda (R$)|price_brl",
-      "Preço promocional (R$)|sale_price_brl",
-      "Créditos para desbloqueio|credits_price",
-      "Capítulos gratuitos|free_chapters_count",
-      "Percentual de royalties|royalty_rate",
-      "Início da promoção|sale_starts_at",
-      "Fim da promoção|sale_ends_at",
-      "SKU interno|sku",
-      "ID Apple|apple_product_id",
-      "ID Google|google_product_id",
-      "ID pagamento web|web_product_id",
-    ],
-    direitos: [
-      "Titular dos direitos|rights_holder_name",
-      "CPF/CNPJ do titular|rights_holder_document",
-      "Contrato|contract_id",
-      "Tipo de licença|license_type",
-      "Territórios autorizados|territories",
-      "Idiomas autorizados|licensed_languages",
-      "Início da licença|license_starts_at",
-      "Fim da licença|license_ends_at",
-      "ISBN|isbn",
-      "Registro autoral|copyright_registration",
-      "Documentos comprobatórios|rights_documents_asset_ids",
-      "Observações jurídicas|legal_notes",
-    ],
-    publicacao: [
-      "Status|status",
-      "Data de publicação|published_at",
-      "Visibilidade|visibility",
-      "Destaque editorial|featured_position",
-      "Regiões de lançamento|release_regions",
-      "Campanha associada|campaign_id",
-      "SEO title|seo_title",
-      "SEO description|seo_description",
-    ],
-  };
-  const titles: Record<string, [string, string, string]> = {
-    obra: [
-      "01",
-      "Dados da obra",
-      "Informações principais exibidas no catálogo.",
-    ],
-    conteudo: [
-      "02",
-      "Estrutura e conteúdo",
-      "Temporadas, capítulos e blocos do Reader.",
-    ],
-    classificacao: [
-      "03",
-      "Classificação e descoberta",
-      "Busca, recomendação, segurança e controle parental.",
-    ],
-    midia: ["04", "Capa, áudio e imersão", "Ativos visuais e sonoros da obra."],
-    comercial: ["05", "Configuração comercial", "Acesso, preço e remuneração."],
-    direitos: [
-      "06",
-      "Direitos e contratos",
-      "Governança obrigatória antes da publicação.",
-    ],
-    publicacao: [
-      "07",
-      "Revisão e publicação",
-      "Checklist, visibilidade e lançamento.",
-    ],
-  };
-  return (
-    <>
-      <PanelTitle
-        step={titles[tab][0]}
-        title={titles[tab][1]}
-        text={titles[tab][2]}
-      />
-      <div className="form-grid">
-        {common[tab].map((s) => {
-          const [label, name] = s.split("|");
-          const isLong =
-            /description|content_json|summary|warnings|mood|events|notes/.test(
-              name,
-            );
-          const type = /(_at|_date|starts|ends)/.test(name)
-            ? "date"
-            : /(price|number|count|rate|duration|position)/.test(name)
-              ? "number"
-              : "text";
-          return (
-            <Field key={name} label={label} name={name} type={type}>
-              {isLong ? (
-                <textarea
-                  name={name}
-                  rows={4}
-                  placeholder={`Informe ${label.toLowerCase()}`}
-                />
-              ) : undefined}
-            </Field>
-          );
-        })}
-        <div className="full consent">
-          <label>
-            <input type="checkbox" name={`${tab}_verified`} /> Informações desta
-            etapa verificadas.
-          </label>
-          <label>
-            <input type="checkbox" name={`${tab}_approved`} /> Etapa aprovada
-            para publicação.
-          </label>
-        </div>
-        {tab === "publicacao" && (
-          <div className="full checklist">
-            <h4>Checklist obrigatório</h4>
-            {[
-              "Texto revisado",
-              "Continuidade validada",
-              "Capa aprovada",
-              "Áudio validado",
-              "Direitos confirmados",
-              "Classificação revisada",
-              "Preço conferido",
-              "QA concluído",
-            ].map((x, i) => (
-              <label key={x}>
-                <input type="checkbox" name={`check_${i}`} /> {x}
-              </label>
-            ))}
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
-function PanelTitle({
-  step,
-  title,
-  text,
-}: {
-  step: string;
-  title: string;
-  text: string;
-}) {
-  return (
-    <div className="panel-title">
-      <span>{step}</span>
-      <div>
-        <h2>{title}</h2>
-        <p>{text}</p>
-      </div>
-    </div>
-  );
-}
-
-// Preserved as the historical R1 dashboard while AdminV2 serves the current UI.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function Admin({ go }: { go: (v: View) => void }) {
-  return (
-    <main className="admin">
-      <aside className="admin-nav">
-        <div className="brand inverse">
-          <span>S</span>
-          <b>Sambu</b>
-          <small>Admin</small>
-        </div>
-        <p>GESTÃO</p>
-        {[
-          "Visão geral",
-          "Catálogo",
-          "Autores",
-          "Leitores",
-          "Assinaturas",
-          "Financeiro",
-          "Curadoria",
-          "Moderação",
-          "Analytics",
-          "Configurações",
-        ].map((x, i) => (
-          <button key={x} className={i === 0 ? "active" : ""}>
-            {x}
-            <span>›</span>
-          </button>
-        ))}
-        <button onClick={() => go("home")}>← Voltar ao aplicativo</button>
-      </aside>
-      <section className="admin-main">
-        <div className="admin-head">
-          <div>
-            <p className="eyebrow coral">PAINEL ADMINISTRATIVO</p>
-            <h1>Visão geral</h1>
-          </div>
-          <button className="primary">+ Nova obra</button>
-        </div>
-        <div className="kpi-grid">
-          <Kpi label="Receita recorrente" value="R$ 84.620" />
-          <Kpi label="Assinantes ativos" value="3.284" />
-          <Kpi label="Leitores ativos" value="18.943" />
-          <Kpi label="Conclusão média" value="68,2%" />
-        </div>
-        <div className="admin-grid">
-          <section className="admin-card wide">
-            <div className="card-head">
-              <h3>Obras recentes</h3>
-              <button>Ver catálogo →</button>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Obra</th>
-                  <th>Autor</th>
-                  <th>Status</th>
-                  <th>Leituras</th>
-                  <th>Receita</th>
-                </tr>
-              </thead>
-              <tbody>
-                {BOOKS.slice(0, 4).map((b, i) => (
-                  <tr key={b.id}>
-                    <td>
-                      <span
-                        className="mini-cover"
-                        style={{ background: b.color }}
-                      />{" "}
-                      <b>{b.title}</b>
-                    </td>
-                    <td>{b.author}</td>
-                    <td>
-                      <span className="table-status">
-                        {i === 2 ? "Em revisão" : b.status}
-                      </span>
-                    </td>
-                    <td>{b.reads}</td>
-                    <td>R$ {(8420 - i * 930).toLocaleString("pt-BR")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
-          <section className="admin-card">
-            <div className="card-head">
-              <h3>Fila editorial</h3>
-              <span>12 pendências</span>
-            </div>
-            {[
-              "Revisão de conteúdo",
-              "Direitos pendentes",
-              "QA de audiobook",
-              "Classificação etária",
-            ].map((x, i) => (
-              <div className="queue" key={x}>
-                <span>{i + 2}</span>
-                <div>
-                  <b>{x}</b>
-                  <small>Prioridade {i < 2 ? "alta" : "normal"}</small>
-                </div>
-                <button>→</button>
-              </div>
-            ))}
-          </section>
-          <section className="admin-card">
-            <div className="card-head">
-              <h3>Novos cadastros</h3>
-            </div>
-            <div className="donut">
-              <b>+1.284</b>
-              <span>usuários</span>
-            </div>
-          </section>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function AdminV2({ go }: { go: (v: View) => void }) {
-  const [tab, setTab] = useState("Visão geral"),
-    [creating, setCreating] = useState(false),
-    [busy, setBusy] = useState(false),
-    [message, setMessage] = useState("");
-  const nav = [
-    "Visão geral",
-    "Catálogo",
-    "Importação",
-    "Autores",
-    "Leitores",
-    "Assinaturas",
-    "Curadoria",
-    "Analytics",
-    "Configurações",
-  ];
-  async function createBook(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setBusy(true);
-    setMessage("");
-    const form = e.currentTarget,
-      data = new FormData(form);
-    const payload = {
-      title: data.get("title"),
-      subtitle: data.get("subtitle"),
-      author: data.get("author"),
-      genre: data.get("genre"),
-      language: data.get("language"),
-      isbn: data.get("isbn"),
-      collection: data.get("collection"),
-      format: data.get("format"),
-      ageRating: data.get("ageRating"),
-      description: data.get("description"),
-      price: Number(data.get("price")),
-      subscribersOnly: data.get("subscribersOnly") === "on",
-      featured: data.get("featured") === "on",
-      freeChapters: Number(data.get("freeChapters") || 1),
-      status: data.get("status"),
-    };
-    const response = await fetch("/api/admin/books", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setMessage(
-        response.status === 401
-          ? "Entre na conta administrativa para cadastrar."
-          : "Revise os campos obrigatórios.",
-      );
-      setBusy(false);
-      return;
-    }
-    for (const kind of ["cover", "epub", "audio"]) {
-      const file = data.get(kind);
-      if (file instanceof File && file.size) {
-        const media = new FormData();
-        media.set("file", file);
-        media.set("kind", kind);
-        media.set("bookId", result.book.id);
-        await fetch("/api/media", { method: "POST", body: media });
+        if(openingRequest.current!==controller)return;setReaderPage(page);navigate("reader",book);
       }
-    }
-    setMessage("Obra criada e arquivos enviados para processamento.");
-    setBusy(false);
-    setCreating(false);
-    form.reset();
-  }
-  return (
-    <main className="admin admin-v2">
-      <aside className="admin-nav">
-        <div className="brand inverse">
-          <span>S</span>
-          <b>Sambu</b>
-          <small>Admin</small>
-        </div>
-        <p>OPERAÇÃO</p>
-        {nav.map((x) => (
-          <button
-            key={x}
-            className={tab === x ? "active" : ""}
-            onClick={() => setTab(x)}
-          >
-            {x}
-            <span>›</span>
-          </button>
-        ))}
-        <button onClick={() => go("home")}>← Voltar ao aplicativo</button>
-      </aside>
-      <section className="admin-main">
-        <div className="admin-head">
-          <div>
-            <p className="eyebrow coral">CENTRAL DE CONTEÚDO</p>
-            <h1>{tab}</h1>
-          </div>
-          <button className="primary" onClick={() => setCreating(true)}>
-            + Nova obra
-          </button>
-        </div>
-        {tab === "Visão geral" && (
-          <>
-            <div className="kpi-grid">
-              <Kpi label="Obras no catálogo" value={String(BOOKS.length)} />
-              <Kpi label="Em revisão" value="3" />
-              <Kpi label="Capítulos publicados" value="48" />
-              <Kpi label="Conclusão média" value="68,2%" />
-            </div>
-            <div className="admin-grid">
-              <section className="admin-card wide">
-                <div className="card-head">
-                  <h3>Catálogo editorial</h3>
-                  <button onClick={() => setTab("Catálogo")}>
-                    Gerenciar →
-                  </button>
-                </div>
-                <AdminBooks />
-              </section>
-              <AdminPipeline />
-              <section className="admin-card">
-                <div className="card-head">
-                  <h3>Infraestrutura MVP</h3>
-                </div>
-                <div className="infra-list">
-                  {[
-                    "Banco de dados ativo",
-                    "Armazenamento de mídia",
-                    "Contas identificadas",
-                    "Progresso sincronizado",
-                    "APIs de catálogo",
-                  ].map((x) => (
-                    <span key={x}>✓ {x}</span>
-                  ))}
-                </div>
-              </section>
-            </div>
-          </>
-        )}
-        {tab === "Catálogo" && (
-          <section className="admin-card">
-            <div className="card-head">
-              <div>
-                <h3>Obras e séries</h3>
-                <small>{BOOKS.length} títulos iniciais</small>
-              </div>
-              <button className="primary" onClick={() => setCreating(true)}>
-                Cadastrar obra
-              </button>
-            </div>
-            <AdminBooks full />
-          </section>
-        )}
-        {tab === "Importação" && <ImportCenter notify={setMessage} />}
-        {tab === "Autores" && (
-          <AdminModule
-            title="Gestão de autores"
-            text="Cadastros, contratos, direitos, royalties e obras vinculadas."
-            stats={[
-              "10 autores ativos",
-              "3 contratos pendentes",
-              "2 propostas em análise",
-            ]}
-          />
-        )}{" "}
-        {tab === "Leitores" && (
-          <AdminModule
-            title="Leitores e perfis"
-            text="Perfis, preferências, biblioteca, progresso e solicitações LGPD."
-            stats={[
-              "18.943 leitores",
-              "4.286 ativos na semana",
-              "68% de retenção",
-            ]}
-          />
-        )}{" "}
-        {tab === "Assinaturas" && <CommercialRules />}{" "}
-        {tab === "Curadoria" && (
-          <AdminModule
-            title="Curadoria da home"
-            text="Organize destaques, rankings, coleções emocionais e lançamentos."
-            stats={["4 vitrines ativas", "10 títulos elegíveis", "2 campanhas"]}
-          />
-        )}{" "}
-        {tab === "Analytics" && (
-          <AdminModule
-            title="Analytics editorial"
-            text="Leituras, conclusão, favoritos, abandono e desempenho por capítulo."
-            stats={["68,2% conclusão", "14h leitura média", "4,9 avaliação"]}
-          />
-        )}{" "}
-        {tab === "Configurações" && (
-          <AdminModule
-            title="Configurações e permissões"
-            text="Funções de administrador, curador, autor, revisor e leitor."
-            stats={[
-              "5 perfis de acesso",
-              "Logs habilitados",
-              "LGPD estruturada",
-            ]}
-          />
-        )}{" "}
-        {message && <div className="admin-message">{message}</div>}
-      </section>
-      {creating && (
-        <div className="modal-backdrop" onClick={() => setCreating(false)}>
-          <section className="book-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <div>
-                <p className="eyebrow coral">NOVA OBRA</p>
-                <h2>Cadastrar conteúdo</h2>
-              </div>
-              <button onClick={() => setCreating(false)}>×</button>
-            </div>
-            <form className="form-grid" onSubmit={createBook}>
-              <Field label="Título" name="title" required />
-              <Field label="Subtítulo" name="subtitle" />
-              <Field label="Autor" name="author" required />
-              <Field label="Gênero" name="genre" required />
-              <Field label="Idioma" name="language">
-                <select name="language">
-                  <option value="pt-BR">Português</option>
-                  <option value="en">Inglês</option>
-                  <option value="es">Espanhol</option>
-                </select>
-              </Field>
-              <Field label="ISBN" name="isbn" />
-              <Field label="Coleção" name="collection" />
-              <Field label="Formato" name="format">
-                <select name="format">
-                  <option>Ebook</option>
-                  <option>Ebook + áudio</option>
-                  <option>Série imersiva</option>
-                  <option>Audiobook</option>
-                  <option>EPUB</option>
-                  <option>PDF</option>
-                </select>
-              </Field>
-              <Field label="Classificação" name="ageRating">
-                <select name="ageRating">
-                  <option>Livre</option>
-                  <option>12</option>
-                  <option>14</option>
-                  <option>16</option>
-                  <option>18</option>
-                </select>
-              </Field>
-              <Field label="Preço (R$)" name="price" type="number" />
-              <Field
-                label="Capítulos gratuitos"
-                name="freeChapters"
-                type="number"
-              >
-                <input
-                  name="freeChapters"
-                  type="number"
-                  min="0"
-                  defaultValue="1"
-                />
-              </Field>
-              <Field label="Status" name="status">
-                <select name="status">
-                  <option value="draft">Rascunho</option>
-                  <option value="review">Em revisão</option>
-                  <option value="scheduled">Agendado</option>
-                  <option value="published">Publicado</option>
-                </select>
-              </Field>
-              <Field label="Sinopse" name="description" required>
-                <textarea name="description" rows={5} />
-              </Field>
-              <div className="media-fields">
-                <label>
-                  <span>Capa</span>
-                  <input
-                    name="cover"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                  />
-                  <small>PNG, JPG ou WebP · até 8 MB</small>
-                </label>
-                <label>
-                  <span>Livro digital</span>
-                  <input
-                    name="epub"
-                    type="file"
-                    accept=".epub,.pdf,application/epub+zip,application/pdf"
-                  />
-                  <small>EPUB · até 40 MB</small>
-                </label>
-                <label>
-                  <span>Áudio</span>
-                  <input
-                    name="audio"
-                    type="file"
-                    accept="audio/mpeg,audio/mp4"
-                  />
-                  <small>MP3 ou M4A · até 250 MB</small>
-                </label>
-              </div>
-              <label className="full premium-check">
-                <input type="checkbox" name="subscribersOnly" /> Disponível
-                exclusivamente para assinantes
-              </label>
-              <label className="full premium-check">
-                <input type="checkbox" name="featured" /> Destacar como
-                lançamento
-              </label>
-              <div className="full modal-actions">
-                <button
-                  type="button"
-                  className="outline"
-                  onClick={() => setCreating(false)}
-                >
-                  Cancelar
-                </button>
-                <button className="primary" disabled={busy}>
-                  {busy ? "Enviando…" : "Criar obra"}
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
-      )}
-    </main>
-  );
-}
-
-type AdminBookRow = {
-  id: string;
-  title: string;
-  subtitle?: string | null;
-  author: string;
-  genre: string;
-  language?: string | null;
-  isbn?: string | null;
-  collection?: string | null;
-  format?: string | null;
-  ageRating?: string | null;
-  description: string;
-  priceCents?: number | null;
-  freeChapters?: number | null;
-  subscribersOnly?: boolean | null;
-  featured?: boolean | null;
-  status: string;
-};
-
-function AdminBooks({ full = false }: { full?: boolean }) {
-  const [rows, setRows] = useState<AdminBookRow[]>([]);
-  const [editing, setEditing] = useState<AdminBookRow | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [actionMessage, setActionMessage] = useState("");
-  async function loadBooks() {
-    const response = await fetch("/api/admin/books");
-    if (response.ok) {
-      const data = (await response.json()) as { books?: AdminBookRow[] };
-      setRows(full ? data.books || [] : (data.books || []).slice(0, 5));
-    }
-  }
-  useEffect(() => {
-    // The request resolves asynchronously before it updates local UI state.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadBooks().catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [full]);
-
-  async function saveBook(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!editing) return;
-    setBusy(true);
-    const data = new FormData(event.currentTarget);
-    const payload = {
-      id: editing.id,
-      title: data.get("title"),
-      subtitle: data.get("subtitle"),
-      author: data.get("author"),
-      genre: data.get("genre"),
-      language: data.get("language"),
-      isbn: data.get("isbn"),
-      collection: data.get("collection"),
-      format: data.get("format"),
-      ageRating: data.get("ageRating"),
-      description: data.get("description"),
-      price: Number(data.get("price")),
-      freeChapters: Number(data.get("freeChapters")),
-      subscribersOnly: data.get("subscribersOnly") === "on",
-      featured: data.get("featured") === "on",
-      status: data.get("status"),
+    }catch(e){if(openingRequest.current!==controller)return;trackReading('reader_open_failed',book.id);notify(controller.signal.aborted?"A abertura demorou mais que o esperado. Verifique sua conexão e tente novamente.":(e as Error).message);}finally{clearTimeout(timeout);if(openingRequest.current===controller){openingRequest.current=null;readingLock.current=false;setOpeningBookId(null);}}
+  },[user,navigate,notify]);
+  useEffect(()=>{
+    let active=true;
+    if(new URLSearchParams(window.location.search).get("view")==="guide")setView("guide");
+    const restore=async()=>{
+      const rows=await load();if(!active||!rows)return;
+      await loadLibrary();if(!active)return;
+      const params=new URLSearchParams(window.location.search);const target=params.get("view") as View;
+      const book=rows.find(b=>b.id===params.get("book"));
+      if(book){setSelected(book);if(target==="reader")await startReading(book);else setView("detail");}
+      else if(["catalog","library","profile","admin","guide"].includes(target))setView(target);
+      if(params.get("search"))setQuery(params.get("search")!);
     };
-    const response = await fetch("/api/admin/books", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (response.ok) {
-      for (const kind of ["cover", "epub", "audio"]) {
-        const file = data.get(kind);
-        if (file instanceof File && file.size) {
-          const media = new FormData();
-          media.set("file", file);
-          media.set("kind", kind);
-          media.set("bookId", editing.id);
-          await fetch("/api/media", { method: "POST", body: media });
-        }
-      }
-      setEditing(null);
-      await loadBooks();
-    }
-    setBusy(false);
+    restore();
+    try{const stored=JSON.parse(localStorage.getItem(`sambu:reader:${user?.email||"guest"}`)||"{}");if(["light","sepia","dark"].includes(stored.theme))setTheme(stored.theme);if(stored.font>=16&&stored.font<=32)setFont(stored.font);}catch{}
+    const pop=async()=>{cancelOpening();const p=new URLSearchParams(window.location.search);const next=p.get("view") as View;const book=booksRef.current.find(b=>b.id===p.get("book"));if(book&&(next==="detail"||next==="reader")){if(next==="reader")await startReading(book);else{setSelected(book);setView("detail");}}else setView(["home","catalog","library","profile","admin","guide"].includes(next)?next:"home");};
+    window.addEventListener("popstate",pop);return()=>{active=false;cancelOpening();window.removeEventListener("popstate",pop);};
+  // Initialization runs once per authenticated identity.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[user?.email]);
+  function preference(nextTheme:string,nextFont:number){setTheme(nextTheme);setFont(nextFont);try{localStorage.setItem(`sambu:reader:${user?.email||"guest"}`,JSON.stringify({theme:nextTheme,font:nextFont}));}catch{notify("Não foi possível guardar a preferência neste aparelho.");}}
+  async function favorite(id:string){
+    if(!user?.participant){navigate("profile");notify(user?messages.invitation_required:messages.sign_in_required);return;}
+    if(favoriteBusy)return;setFavoriteBusy(true);
+    try{const value=!favorites.includes(id);await requestJson("/api/favorites",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({bookId:id,favorite:value})});setFavorites(v=>value?[...v,id]:v.filter(x=>x!==id));notify(value?"Livro salvo na biblioteca.":"Livro removido dos favoritos.");}catch(e){notify((e as Error).message);}finally{setFavoriteBusy(false);}
   }
-
-  async function unpublishBook() {
-    if (!editing) return;
-    if (!window.confirm(`Despublicar “${editing.title}” do acervo público?`))
-      return;
-    setBusy(true);
-    const response = await fetch("/api/admin/books", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: editing.id, status: "archived" }),
-    });
-    if (response.ok) {
-      setActionMessage(`“${editing.title}” foi despublicado e preservado.`);
-      setEditing(null);
-      await loadBooks();
-    } else {
-      setActionMessage("Não foi possível despublicar o ebook.");
-    }
-    setBusy(false);
-  }
-
-  async function deleteBook() {
-    if (!editing) return;
-    const confirmationTitle = window.prompt(
-      `Esta ação apaga o cadastro, o arquivo e a capa. Digite exatamente o título para confirmar:\n\n${editing.title}`,
-    );
-    if (confirmationTitle === null) return;
-    if (confirmationTitle !== editing.title) {
-      setActionMessage("Exclusão cancelada: o título informado não confere.");
-      return;
-    }
-    setBusy(true);
-    const response = await fetch("/api/admin/books", {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: editing.id, confirmationTitle }),
-    });
-    if (response.ok) {
-      setActionMessage(`“${editing.title}” foi excluído definitivamente.`);
-      setEditing(null);
-      await loadBooks();
-    } else {
-      const data = await response.json().catch(() => ({}));
-      setActionMessage(
-        data.error === "confirmation_mismatch"
-          ? "Exclusão cancelada: o título informado não confere."
-          : "Não foi possível excluir o ebook.",
-      );
-    }
-    setBusy(false);
-  }
-
-  return (
-    <div className="admin-table-wrap catalog-manager">
-      {actionMessage && (
-        <div className="catalog-action-message" role="status">
-          <span>{actionMessage}</span>
-          <button onClick={() => setActionMessage("")} aria-label="Fechar aviso">
-            ×
-          </button>
-        </div>
-      )}
-      <table>
-        <thead>
-          <tr>
-            <th>Obra</th>
-            <th>Autoria</th>
-            <th>Formato</th>
-            <th>Status</th>
-            <th>Preço</th>
-            <th>Ações</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((b) => (
-            <tr key={b.id}>
-              <td>
-                {/* Dynamic catalog images come from the protected cover endpoint. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  className="mini-cover"
-                  src={coverUrlFor(b.id)}
-                  alt=""
-                  loading="lazy"
-                />
-                <b>{b.title}</b>
-              </td>
-              <td>{b.author}</td>
-              <td>{b.format}</td>
-              <td>
-                <span className="table-status">{b.status}</span>
-              </td>
-              <td>
-                R$ {((b.priceCents || 0) / 100).toFixed(2).replace(".", ",")}
-              </td>
-              <td>
-                <button
-                  className="outline table-action"
-                  onClick={() => setEditing(b)}
-                >
-                  Editar
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {!rows.length && (
-        <p className="table-empty">Nenhuma obra cadastrada no banco.</p>
-      )}
-      {editing && (
-        <div className="modal-backdrop" onClick={() => setEditing(null)}>
-          <section
-            className="book-modal"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="modal-head">
-              <div>
-                <p className="eyebrow coral">GESTÃO DO ACERVO</p>
-                <h2>Editar obra</h2>
-              </div>
-              <button onClick={() => setEditing(null)}>×</button>
-            </div>
-            <form className="form-grid" onSubmit={saveBook}>
-              <Field label="Título" name="title" required>
-                <input name="title" defaultValue={editing.title} required />
-              </Field>
-              <Field label="Subtítulo" name="subtitle">
-                <input name="subtitle" defaultValue={editing.subtitle || ""} />
-              </Field>
-              <Field label="Autor" name="author" required>
-                <input name="author" defaultValue={editing.author} required />
-              </Field>
-              <Field label="Gênero/categoria" name="genre" required>
-                <input name="genre" defaultValue={editing.genre} required />
-              </Field>
-              <Field label="Idioma" name="language">
-                <select
-                  name="language"
-                  defaultValue={editing.language || "pt-BR"}
-                >
-                  <option value="pt-BR">Português</option>
-                  <option value="en">Inglês</option>
-                  <option value="es">Espanhol</option>
-                </select>
-              </Field>
-              <Field label="ISBN" name="isbn">
-                <input name="isbn" defaultValue={editing.isbn || ""} />
-              </Field>
-              <Field label="Coleção" name="collection">
-                <input
-                  name="collection"
-                  defaultValue={editing.collection || ""}
-                />
-              </Field>
-              <Field label="Formato" name="format">
-                <select name="format" defaultValue={editing.format || "EPUB"}>
-                  <option>EPUB</option>
-                  <option>PDF</option>
-                  <option>Ebook + áudio</option>
-                </select>
-              </Field>
-              <Field label="Classificação" name="ageRating">
-                <select
-                  name="ageRating"
-                  defaultValue={editing.ageRating || "14"}
-                >
-                  <option>Livre</option>
-                  <option>12</option>
-                  <option>14</option>
-                  <option>16</option>
-                  <option>18</option>
-                </select>
-              </Field>
-              <Field label="Preço (R$)" name="price" type="number">
-                <input
-                  name="price"
-                  type="number"
-                  step="0.01"
-                  defaultValue={(editing.priceCents || 0) / 100}
-                />
-              </Field>
-              <Field
-                label="Capítulos gratuitos"
-                name="freeChapters"
-                type="number"
-              >
-                <input
-                  name="freeChapters"
-                  type="number"
-                  min="0"
-                  defaultValue={editing.freeChapters || 1}
-                />
-              </Field>
-              <Field label="Status" name="status">
-                <select name="status" defaultValue={editing.status}>
-                  <option value="draft">Rascunho</option>
-                  <option value="review">Em revisão</option>
-                  <option value="published">Publicado</option>
-                  <option value="archived">Despublicado</option>
-                </select>
-              </Field>
-              <Field label="Descrição" name="description" required>
-                <textarea
-                  name="description"
-                  rows={5}
-                  defaultValue={editing.description}
-                  required
-                />
-              </Field>
-              <div className="media-fields">
-                <label>
-                  <span>Substituir capa</span>
-                  <input
-                    name="cover"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                  />
-                </label>
-                <label>
-                  <span>Substituir livro</span>
-                  <input
-                    name="epub"
-                    type="file"
-                    accept=".epub,.pdf,application/epub+zip,application/pdf"
-                  />
-                </label>
-                <label>
-                  <span>Substituir áudio</span>
-                  <input
-                    name="audio"
-                    type="file"
-                    accept="audio/mpeg,audio/mp4"
-                  />
-                </label>
-              </div>
-              <label className="full premium-check">
-                <input
-                  type="checkbox"
-                  name="subscribersOnly"
-                  defaultChecked={editing.subscribersOnly ?? false}
-                />{" "}
-                Exclusivo para assinantes
-              </label>
-              <label className="full premium-check">
-                <input
-                  type="checkbox"
-                  name="featured"
-                  defaultChecked={editing.featured ?? false}
-                />{" "}
-                Destacar como lançamento
-              </label>
-              <div className="full modal-actions">
-                <button
-                  type="button"
-                  className="outline"
-                  onClick={() => setEditing(null)}
-                >
-                  Cancelar
-                </button>
-                <button className="primary" disabled={busy}>
-                  {busy ? "Salvando…" : "Salvar alterações"}
-                </button>
-              </div>
-              <section className="full catalog-danger-zone">
-                <div>
-                  <p className="eyebrow coral">ÁREA DE SEGURANÇA</p>
-                  <h3>Retirar este ebook do acervo</h3>
-                  <p>
-                    Despublicar remove a obra do catálogo público e preserva o
-                    cadastro e os arquivos. Excluir definitivamente apaga o
-                    livro, a capa e os dados associados.
-                  </p>
-                </div>
-                <div>
-                  <button
-                    type="button"
-                    className="outline"
-                    onClick={unpublishBook}
-                    disabled={busy || editing.status === "archived"}
-                  >
-                    {editing.status === "archived"
-                      ? "Já despublicado"
-                      : "Despublicar"}
-                  </button>
-                  <button
-                    type="button"
-                    className="danger-button"
-                    onClick={deleteBook}
-                    disabled={busy}
-                  >
-                    Excluir definitivamente
-                  </button>
-                </div>
-              </section>
-            </form>
-          </section>
-        </div>
-      )}
+  useEffect(()=>{if(!user?.participant||view==="reader")return;const refresh=()=>{if(document.visibilityState==="visible")void loadLibrary();};window.addEventListener("focus",refresh);document.addEventListener("visibilitychange",refresh);if(view==="library")refresh();return()=>{window.removeEventListener("focus",refresh);document.removeEventListener("visibilitychange",refresh);};},[user?.participant,view,loadLibrary]);
+  const save = useCallback(async(bookId:string,location:Location):Promise<Location>=>{
+    const response=await apiFetch("/api/progress",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({bookId,...location}),keepalive:true,cache:"no-store"});
+    const data=await response.json() as {location?:Location};
+    if(response.status===409&&data.location){setLocations(current=>({...current,[bookId]:data.location!}));throw Object.assign(new Error("Leitura atualizada em outro dispositivo."),{location:data.location});}
+    if(!response.ok||!data.location)throw new Error("Não foi possível salvar a leitura.");
+    setLocations(current=>({...current,[bookId]:data.location!}));return data.location;
+  },[]);
+  const filtered=useMemo(()=>books.filter(b=>(genre==="Todos"||b.genre===genre)&&searchText(`${b.title} ${b.author} ${b.genre} ${b.categoryMain||""} ${(b.categoriesSecondary||[]).join(" ")}`).includes(searchText(query))).sort((a,b)=>sort==="title"?a.title.localeCompare(b.title,"pt-BR"):(b.publishedAt||"").localeCompare(a.publishedAt||"")),[books,query,genre,sort]);
+  const cards=(list:Book[])=><div className="book-grid">{list.map(book=><BookCard key={book.id} book={book} saved={favorites.includes(book.id)} onOpen={()=>navigate("detail",book)} onFavorite={()=>favorite(book.id)}/>)}</div>;
+  return <div className="app-shell beta-app">
+    {view!=="reader"&&<header><button className="brand community-brand" onClick={()=>navigate("home")} aria-label="Início Sambu"><img src="/sambu-comunidade-horizontal.webp" alt="Sambu — Comunidade de leitura" width="640" height="256"/></button><nav aria-label="Navegação principal">{NAV.map(item=><button key={item.id} className={view===item.id?"active":""} onClick={()=>navigate(item.id)}>{item.label}</button>)}{user?.admin&&<button onClick={()=>navigate("admin")}>Administração</button>}</nav><button className="outline" onClick={()=>navigate("profile")}>{user?"Minha conta":"Entrar"}</button></header>}
+    {view!=="reader"&&<div className="beta-banner">Versão beta · leitura gratuita · registramos uso e falhas de leitura para melhorar o aplicativo · <button className="pilot-guide-link" onClick={()=>navigate("guide")}>Como participar</button></div>}
+    {view!=="reader"&&<nav className="beta-mobile-nav" aria-label="Navegação móvel">{NAV.map(x=><button key={x.id} aria-current={view===x.id?"page":undefined} onClick={()=>navigate(x.id)}>{x.id==="library"?"Biblioteca":x.label}</button>)}<button aria-current={view==="profile"?"page":undefined} onClick={()=>navigate("profile")}>Conta</button>{user?.admin&&<button aria-current={view==="admin"?"page":undefined} onClick={()=>navigate("admin")}>Admin</button>}</nav>}
+    {view==="home"&&<BetaHome books={books} user={user} loading={loading} error={error} retry={load} favorites={favorites} locations={locations} readingBusy={readingBusy} openingBookId={openingBookId} onOpen={b=>navigate("detail",b)} onRead={startReading} onFavorite={favorite} onCatalog={g=>{if(g)rememberSearch(g);setQuery("");setGenre(g||"Todos");navigate("catalog");}} onLibrary={()=>navigate("library")} onSearch={q=>{rememberSearch(q);setQuery(q);setGenre("Todos");navigate("catalog");}}/>}
+    {view==="catalog"&&<main className="page"><div className="page-title"><p className="eyebrow">SAMBU EBOOKS</p><h1>Explore o acervo</h1><p>Escolha uma história e leia no seu ritmo.</p></div>
+      <div className="search-box"><input aria-label="Buscar livros" placeholder="Busque por título, autor ou gênero" value={query} onChange={e=>setQuery(e.target.value)}/><button onClick={()=>{setQuery("");setGenre("Todos");}}>Limpar</button></div>
+      <div className="filter-row"><label>Gênero <select value={genre} onChange={e=>{setGenre(e.target.value);if(e.target.value!=="Todos")rememberSearch(e.target.value);}}><option>Todos</option>{Array.from(new Set(books.map(b=>b.genre))).sort().map(g=><option key={g}>{g}</option>)}</select></label><label>Ordenar <select value={sort} onChange={e=>setSort(e.target.value)}><option value="recent">Mais recentes</option><option value="title">Título A–Z</option></select></label></div>
+      {loading?<p role="status">Carregando acervo…</p>:error?<div role="alert"><p>{error}</p><button className="outline" onClick={load}>Tentar novamente</button></div>:<><p>{filtered.length} {filtered.length===1?"livro encontrado":"livros encontrados"}</p>{filtered.length?cards(filtered):<div className="library-empty"><h2>{books.length?"Nenhum resultado":"O acervo está sendo preparado"}</h2><p>{books.length?"Tente outro título ou gênero.":"As obras aprovadas aparecerão aqui."}</p></div>}</>}
+    </main>}
+    {view==="library"&&<main className="page"><h1>Minha biblioteca</h1>{!user?.participant?<AccessNotice user={user}/>:loading||libraryLoading?<p role="status">Atualizando sua biblioteca…</p>:error||libraryError?<div className="library-empty" role="alert"><h2>Sua biblioteca não pôde ser atualizada</h2><p>{error||libraryError}</p><button className="outline" onClick={()=>{void load();void loadLibrary();}}>Tentar novamente</button></div>:<>
+      <section className="beta-library-section"><h2>Continue sua leitura</h2>{books.some(b=>locations[b.id]?.progress>0&&locations[b.id]?.progress<100)?books.filter(b=>locations[b.id]?.progress>0&&locations[b.id]?.progress<100).map(b=><article className="beta-continue" key={b.id}><Cover book={b}/><div className="continue-info"><h3>{b.title}</h3><p className="continue-percent">{locations[b.id].progress}% lido</p><progress className="reading-progress" value={locations[b.id].progress} max={100} aria-label={`Progresso da leitura de ${b.title}`}/></div><button className="primary continue-button" disabled={readingBusy} onClick={()=>startReading(b)}>{openingBookId===b.id?"Abrindo…":"Continuar leitura"}</button></article>):<div className="library-empty"><p>Seu próximo momento de leitura começa com uma escolha.</p><button className="outline" onClick={()=>navigate("catalog")}>Encontrar um livro</button></div>}</section>
+      <section className="beta-library-section"><h2>Livros salvos</h2>{books.some(b=>favorites.includes(b.id))?cards(books.filter(b=>favorites.includes(b.id))):<div className="library-empty"><p>Toque no coração de um livro para guardá-lo aqui.</p><button className="outline" onClick={()=>navigate("home")}>Ver sugestões de leitura</button></div>}</section>
+      <section className="beta-library-section"><h2>Concluídos</h2>{books.some(b=>locations[b.id]?.progress===100)?cards(books.filter(b=>locations[b.id]?.progress===100)):<p>Os livros que você concluir aparecerão aqui.</p>}</section>
+    </>}</main>}
+    {view==="detail"&&selected&&<main className="detail"><button className="back" onClick={()=>navigate("catalog")}>← Voltar ao acervo</button><section><Cover book={selected}/><div className="book-info"><p>{selected.genre}</p><h1>{selected.title}</h1><p>por {selected.author}</p><p className="blurb">{selected.description}</p><p>{selected.format||"Ebook"} · Disponível gratuitamente no beta</p><div className="actions"><button className="primary" disabled={readingBusy} onClick={()=>startReading(selected)}>{openingBookId===selected.id?"Abrindo…":locations[selected.id]?.progress&&locations[selected.id].progress<100?"Continuar leitura":"Ler agora"}</button><button className="outline" disabled={favoriteBusy} onClick={()=>favorite(selected.id)}>{favorites.includes(selected.id)?"♥ Salvo":"♡ Salvar"}</button></div></div></section></main>}
+    {view==="reader"&&selected&&<Reader key={selected.id} book={selected} initialPage={readerPage} initial={locations[selected.id]||{position:0,progress:0}} theme={theme} font={font} preference={preference} onSave={save} onBack={()=>navigate("detail",selected)}/>}
+    {view==="guide"&&<PilotGuide signedIn={!!user} onCatalog={()=>navigate("catalog")} onProfile={()=>navigate("profile")}/>}
+    {view==="profile"&&<Profile user={user} notify={notify}/>}
+    {view==="admin"&&<main className="page">{user?.admin?(user.adminTrial?<><p className="beta-banner">Administração de testes · as alterações afetam o acervo real.</p><Admin owner={user.email} notify={notify} onChange={load}/></>:<MasterGate owner={user.email} notify={notify} onChange={load}/>):<AccessNotice user={user} admin/>}</main>}
+    {toast&&<div className="toast" role="status">{toast}</div>}
+  </div>;
+}
+function BetaHome({books,user,loading,error,retry,favorites,locations,readingBusy,openingBookId,onOpen,onRead,onFavorite,onCatalog,onLibrary,onSearch}:{books:Book[];user:User;loading:boolean;error:string;retry:()=>unknown;favorites:string[];locations:Record<string,Location>;readingBusy:boolean;openingBookId:string|null;onOpen:(b:Book)=>void;onRead:(b:Book)=>void;onFavorite:(id:string)=>void;onCatalog:(genre?:string)=>void;onLibrary:()=>void;onSearch:(q:string)=>void}) {
+  const [search,setSearch]=useState("");
+  const latest=books.slice(0,10),spotlight=books.slice(0,3);
+  const ongoing=books.filter(b=>locations[b.id]?.progress>0&&locations[b.id]?.progress<100).slice(0,2);
+  const genres=Array.from(new Set(books.map(b=>b.genre))).filter(Boolean);
+  return <main className="r3-home">
+    <div className="r3-discover"><span>Encontre sua próxima leitura</span><button onClick={()=>onCatalog()}>Todo o acervo</button>{genres.slice(0,7).map(g=><button key={g} onClick={()=>onCatalog(g)}>{g}</button>)}</div>
+    <section className="r3-hero">
+      <div className="r3-hero-copy"><p className="r3-pill">SAMBU <span>Histórias que ficam em você</span></p><h1>Sua próxima história<br/><em>começa aqui.</em></h1><p className="r3-hero-description">Uma descoberta, uma nova perspectiva, um momento só seu. Encontre um livro que acompanhe você.</p><div className="r3-hero-actions"><button className="primary" onClick={()=>ongoing[0]?onRead(ongoing[0]):onCatalog()} disabled={readingBusy}>{ongoing[0]&&openingBookId===ongoing[0].id?"Abrindo…":ongoing[0]?"Continuar minha leitura":"Encontrar meu próximo livro"}</button><button className="r3-secondary" onClick={onLibrary}>Minha biblioteca</button></div><form className="r3-home-search" onSubmit={e=>{e.preventDefault();onSearch(search);}}><input aria-label="Buscar livros na página inicial" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Qual história você procura?"/><button type="submit">Buscar</button></form></div>
+      <div className={`r3-spotlight r3-spotlight-${spotlight.length}`} aria-label="Livros em destaque">{spotlight.length?<><div className="r3-cover-fan">{spotlight.map((b,i)=><button key={b.id} className={`r3-featured-cover r3-cover-${i}`} onClick={()=>onOpen(b)} aria-label={`Conhecer ${b.title}`}><Cover book={b}/></button>)}</div><button className="r3-featured-caption" onClick={()=>onOpen(spotlight[0])}><span>EM DESTAQUE</span><strong>{spotlight[0].title}</strong><small>{spotlight[0].author} · Conhecer o livro →</small></button></>:<div className="r3-welcome"><img src="/sambu-comunidade-horizontal.webp" alt="Sambu — Comunidade de leitura" width="640" height="256"/><p>{loading?"Preparando suas próximas descobertas…":error?"Seu acervo estará de volta em breve.":"Novas histórias estão a caminho."}</p></div>}</div>
+    </section>
+    <div className="r3-home-content">
+      {error&&<div className="r3-home-notice" role="alert"><p>{error}</p><button className="outline" onClick={retry}>Tentar novamente</button></div>}
+      {!!ongoing.length&&<section className="r3-home-section"><div className="r3-section-heading"><div><p className="eyebrow">SUA JORNADA</p><h2>Continue de onde parou</h2></div><button onClick={onLibrary}>Minha biblioteca →</button></div><div className="r3-continue-grid">{ongoing.map(b=><article className="beta-continue" key={b.id}><Cover book={b}/><div className="continue-info"><h3>{b.title}</h3><p className="continue-percent">{locations[b.id].progress}% lido</p><progress className="reading-progress" value={locations[b.id].progress} max={100} aria-label={`Progresso da leitura de ${b.title}`}/></div><button className="primary continue-button" disabled={readingBusy} onClick={()=>onRead(b)}>{openingBookId===b.id?"Abrindo…":"Continuar leitura"}</button></article>)}</div></section>}
+      <section className="r3-home-section"><div className="r3-section-heading"><div><p className="eyebrow">ABRA ESPAÇO PARA UMA NOVA HISTÓRIA</p><h2>Novidades no acervo</h2></div><button onClick={()=>onCatalog()}>Explorar todos →</button></div>{loading?<p role="status">Carregando livros…</p>:latest.length?<HomeBookRail books={latest} favorites={favorites} onOpen={onOpen} onFavorite={onFavorite}/>:!error&&<div className="r3-home-notice"><h3>O acervo está sendo preparado</h3><p>As obras publicadas aparecerão aqui para você descobrir.</p></div>}</section>
+      <SuggestedBooks books={books} user={user} favorites={favorites} locations={locations} onOpen={onOpen} onFavorite={onFavorite} onLibrary={onLibrary} onCatalog={onCatalog}/>
+      <section className="r3-reading-banner"><div><p className="eyebrow">NO SEU TEMPO, DO SEU JEITO</p><h2>Uma pausa.<br/>Um livro. Você.</h2><p>Guarde suas descobertas nos favoritos e volte à sua próxima leitura quando quiser.</p></div><button className="primary" onClick={user?.participant?onLibrary:()=>onCatalog()}>{user?.participant?"Abrir minha biblioteca":"Descobrir o acervo"}</button></section>
     </div>
-  );
+  </main>;
+}
+function SuggestedBooks({books,user,favorites,locations,onOpen,onFavorite,onLibrary,onCatalog}:{books:Book[];user:User;favorites:string[];locations:Record<string,Location>;onOpen:(b:Book)=>void;onFavorite:(id:string)=>void;onLibrary:()=>void;onCatalog:(genre?:string)=>void}) {
+  const [suggestions,setSuggestions]=useState<{bookId:string;reason:string}[]>([]),[busy,setBusy]=useState(!!user?.participant),[error,setError]=useState("");
+  const [retry,setRetry]=useState(0),[adding,setAdding]=useState<string|null>(null);
+  const signature=JSON.stringify([books.map(b=>b.id),favorites,locations]);
+  useEffect(()=>{let active=true;setError("");if(!user?.participant){setBusy(false);return;}setBusy(true);requestJson("/api/recommendations",{cache:"no-store"}).then(d=>{if(active)setSuggestions(d.recommendations||[]);}).catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setBusy(false);});return()=>{active=false;};},[user?.email,user?.participant,signature,retry]);
+  const eligible=books.filter(b=>!favorites.includes(b.id)&&!locations[b.id]?.progress);
+  const displayed=(user?.participant?suggestions:eligible.slice(0,4).map(b=>({bookId:b.id,reason:"Uma nova descoberta no acervo"}))).flatMap(s=>{const book=eligible.find(b=>b.id===s.bookId);return book?[{book,reason:s.reason}]:[];});
+  return <section className="r3-home-section r3-suggestions"><div className="r3-section-heading"><div><p className="eyebrow">SUA PRÓXIMA DESCOBERTA</p><h2>Sugestões para você</h2><p className="r3-suggestions-intro">{user?.participant?"Encontre novas leituras a partir das suas buscas e dos livros que você lê e salva.":"Conheça os livros do acervo e escolha quais quer guardar para depois."}</p></div><button onClick={onLibrary}>Minha biblioteca →</button></div>
+    {busy?<p role="status">Selecionando suas próximas leituras…</p>:error?<div className="r3-home-notice" role="alert"><p>Não foi possível carregar suas sugestões.</p><button className="outline" onClick={()=>setRetry(v=>v+1)}>Tentar novamente</button></div>:displayed.length?<div className="r3-suggestion-grid">{displayed.map(({book,reason})=><article className="r3-suggestion-card" key={book.id}><button className="r3-suggestion-cover" aria-label={`Conhecer ${book.title}`} onClick={()=>onOpen(book)}><Cover book={book}/></button><div className="r3-suggestion-info"><p className="r3-suggestion-reason">{reason}</p><h3><button onClick={()=>onOpen(book)}>{book.title}</button></h3><p className="r3-suggestion-author">{book.author}</p><span className="r3-suggestion-genre">{book.genre}</span><p className="r3-suggestion-description">{book.description}</p></div><div className="r3-suggestion-actions"><button className="primary" disabled={!!adding} onClick={async()=>{setAdding(book.id);try{await onFavorite(book.id);}finally{setAdding(null);}}}>{adding===book.id?"Adicionando…":"+ Adicionar à biblioteca"}</button><button className="r3-suggestion-details" onClick={()=>onOpen(book)}>Conhecer o livro</button></div></article>)}</div>:<div className="r3-home-notice"><h3>{books.length?"Suas descobertas já estão com você":"Novas sugestões estão a caminho"}</h3><p>{books.length?"Você já salvou ou começou os livros disponíveis. Novas sugestões aparecerão quando o acervo crescer.":"Os livros publicados aparecerão aqui para você escolher sua próxima leitura."}</p><button className="outline" onClick={books.length?onLibrary:()=>onCatalog()}>{books.length?"Ir para minha biblioteca":"Explorar acervo"}</button></div>}
+  </section>;
+}
+function HomeBookRail({books,favorites,onOpen,onFavorite}:{books:Book[];favorites:string[];onOpen:(b:Book)=>void;onFavorite:(id:string)=>void}) {
+  const rail=useRef<HTMLDivElement>(null);
+  const [edges,setEdges]=useState({start:true,end:true});
+  useEffect(()=>{const el=rail.current;if(!el)return;const update=()=>setEdges({start:el.scrollLeft<5,end:el.scrollLeft+el.clientWidth>=el.scrollWidth-5});update();const observer=new ResizeObserver(update);observer.observe(el);el.addEventListener("scroll",update,{passive:true});return()=>{observer.disconnect();el.removeEventListener("scroll",update);};},[books.length]);
+  return <><div className="r3-book-rail" ref={rail} aria-label="Novidades no acervo">{books.map(b=><BookCard key={b.id} book={b} saved={favorites.includes(b.id)} onOpen={()=>onOpen(b)} onFavorite={()=>onFavorite(b.id)}/>)}</div>{!(edges.start&&edges.end)&&<div className="r3-rail-controls"><button aria-label="Ver livros anteriores" disabled={edges.start} onClick={()=>rail.current?.scrollBy({left:-rail.current.clientWidth*.8,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})}>←</button><button aria-label="Ver próximos livros" disabled={edges.end} onClick={()=>rail.current?.scrollBy({left:rail.current.clientWidth*.8,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})}>→</button></div>}</>;
+}
+function AccessNotice({user,admin=false}:{user:User;admin?:boolean}) {
+  return <section className="library-empty"><h2>{!user?"Entre para continuar":admin?"Acesso administrativo restrito":"Acesso por convite"}</h2><p>{!user?"Entre com sua própria conta do ChatGPT. Depois, salve seu nome em Minha conta e comece a ler.":admin?"Sua conta não possui permissão para administrar o acervo.":"Solicite à equipe Sambu a inclusão do seu email entre os participantes."}</p>{!user&&<a target="_top" className="primary" href={serviceUrl("/login?return_to=%2F%3Fview%3Dprofile")}>Entrar no Sambu</a>}</section>;
+}
+function Profile({user,notify}:{user:User;notify:(s:string)=>void}) {
+  const [name,setName]=useState(user?.name||""),[details,setDetails]=useState<ReaderProfile>(cleanReaderProfile(null)),[busy,setBusy]=useState(false),[loading,setLoading]=useState(!!user),[error,setError]=useState("");
+  const load=useCallback(async()=>{if(!user)return;setLoading(true);setError("");try{const d=await requestJson("/api/profile");setName(d.profile?.displayName||user.name);setDetails(cleanReaderProfile(d.profile?.tasteProfile));}catch{setError("Não foi possível carregar seu cadastro. Tente novamente antes de editar.");}finally{setLoading(false);}},[user]);
+  useEffect(()=>{void load();},[load]);
+  if(!user)return <main className="page"><AccessNotice user={user}/></main>;
+  const field=(key:keyof ReaderProfile,value:string)=>setDetails(current=>({...current,[key]:value}));
+  return <main className="page profile-page"><div className="page-title"><p className="eyebrow">SEU ESPAÇO NO SAMBU</p><h1>Meu cadastro</h1><p>Conte um pouco sobre você e suas leituras.</p></div>{loading?<p role="status">Carregando cadastro…</p>:error?<div role="alert"><p>{error}</p><button className="outline" onClick={load}>Tentar novamente</button></div>:<form className="beta-form profile-card" onSubmit={async e=>{e.preventDefault();setBusy(true);try{await requestJson("/api/profile",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({displayName:name,tasteProfile:details})});notify("Cadastro salvo com sucesso.");}catch(e){notify((e as Error).message);}finally{setBusy(false);}}}>
+    <fieldset disabled={busy}><legend>Dados pessoais</legend><div className="profile-fields"><label>Nome de exibição *<input autoComplete="nickname" value={name} required maxLength={80} onChange={e=>setName(e.target.value)} placeholder="Como você quer ser chamado?"/></label><label>E-mail da conta<input type="email" value={user.email} readOnly/><small>Vinculado à sua conta Sambu.</small></label><label>Cidade<input autoComplete="address-level2" value={details.city} maxLength={80} placeholder="Ex.: Curitiba" onChange={e=>field('city',e.target.value)}/></label><label>Estado / região<input autoComplete="address-level1" value={details.region} maxLength={80} placeholder="Ex.: Paraná" onChange={e=>field('region',e.target.value)}/></label></div></fieldset>
+    <fieldset disabled={busy}><legend>Sobre suas leituras</legend><div className="profile-fields"><label>Idioma preferido<select value={details.language} onChange={e=>field('language',e.target.value)}><option value="">Selecione</option><option>Português</option><option>Inglês</option><option>Espanhol</option><option>Outro</option></select></label><label>Gêneros favoritos<input value={details.genres} maxLength={200} placeholder="Ex.: suspense, romance, desenvolvimento pessoal" onChange={e=>field('genres',e.target.value)}/></label><label className="profile-wide">Sobre você como leitor<textarea value={details.bio} rows={3} maxLength={500} placeholder="O que você gosta de encontrar em um bom livro?" onChange={e=>field('bio',e.target.value)}/></label></div></fieldset><p className="profile-note">Cidade, região e preferências são opcionais. Essas informações ficam no seu cadastro e não são exibidas aos outros leitores.</p><div className="profile-actions"><button className="primary" disabled={busy}>{busy?"Salvando…":"Salvar cadastro"}</button><a className="outline" href="/?view=catalog">Explorar livros</a></div></form>}<p>O beta é gratuito. Nenhuma assinatura ou cobrança é iniciada aqui.</p><button className="outline" onClick={async()=>{try{const response=await apiFetch("/api/auth",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"logout"})});if(!response.ok)throw new Error();window.location.assign("/");}catch{notify("Não foi possível sair. Tente novamente.");}}}>Sair da conta</button></main>;
+}
+function MasterGate({owner,notify,onChange}:{owner:string;notify:(s:string)=>void;onChange:()=>Promise<unknown>}) {
+  const [status,setStatus]=useState<{configured:boolean;unlocked:boolean}|null>(null);
+  const [password,setPassword]=useState(""),[confirm,setConfirm]=useState(""),[error,setError]=useState(""),[busy,setBusy]=useState(false);
+  const check=useCallback(async()=>{setError("");try{const d=await requestJson("/api/admin/master",{cache:"no-store"});setStatus({configured:!!d.configured,unlocked:!!d.unlocked});}catch(e){setError((e as Error).message);}},[]);
+  useEffect(()=>{check();const lock=()=>{setPassword("");setConfirm("");setStatus({configured:true,unlocked:false});};window.addEventListener("sambu-master-locked",lock);return()=>window.removeEventListener("sambu-master-locked",lock);},[check]);
+  async function submit(action:string){
+    setBusy(true);setError("");
+    try{await requestJson("/api/admin/master",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,password})});setPassword("");setConfirm("");await check();}
+    catch(e){setError((e as Error).message);}finally{setBusy(false);}
+  }
+  if(!status)return <section className="library-empty"><h1>Administração</h1>{error?<><p role="alert">{error}</p><button className="outline" onClick={check}>Tentar novamente</button></>:<p role="status">Verificando acesso…</p>}</section>;
+  if(status.unlocked)return <><div className="master-toolbar"><span>Usuário master · acesso desbloqueado</span><button className="outline" disabled={busy} onClick={()=>submit("logout")}>Bloquear administração</button></div>{error&&<p role="alert">{error}</p>}<Admin owner={owner} notify={notify} onChange={onChange}/></>;
+  return <section className="master-login"><p className="eyebrow">ADMINISTRAÇÃO SAMBU</p><h1>{status.configured?"Entrar como master":"Criar senha master"}</h1><p>{status.configured?"Digite sua senha para administrar o acervo.":"Defina a senha que protegerá a administração. Guarde-a em um local seguro."}</p><form className="beta-form" onSubmit={e=>{e.preventDefault();if(!status.configured&&password!==confirm){setError("As senhas não coincidem.");return;}submit(status.configured?"login":"setup");}}><label>Usuário<input value="master" readOnly autoComplete="username"/></label><label>Senha master<input type="password" autoComplete={status.configured?"current-password":"new-password"} required minLength={12} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)} aria-describedby="master-password-hint"/></label><p id="master-password-hint">Use entre 12 e 128 caracteres. O acesso expira em duas horas.</p>{!status.configured&&<label>Confirmar senha<input type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={confirm} onChange={e=>setConfirm(e.target.value)}/></label>}{error&&<p role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?"Aguarde…":status.configured?"Entrar na administração":"Criar senha e entrar"}</button></form></section>;
+}
+function Admin({owner,notify,onChange}:{owner:string;notify:(s:string)=>void;onChange:()=>Promise<unknown>}) {
+  const [deleteOpen,setDeleteOpen]=useState(false),[confirmTitle,setConfirmTitle]=useState("");
+  const [importing,setImporting]=useState(false);
+  const [tab,setTab]=useState("catalog"),[rows,setRows]=useState<Book[]>([]),[error,setError]=useState(""),[busy,setBusy]=useState(false),[editing,setEditing]=useState<Book|null>(null);
+  const reload=useCallback(async()=>{setError("");try{const data=await requestJson("/api/admin/books");setRows(data.books||[]);await onChange();}catch(e){setError((e as Error).message);}},[onChange]);
+  useEffect(()=>{reload();},[reload]);
+  return <><div className="page-title"><h1>Administração do acervo</h1><p>{rows.filter(b=>b.status==="published").length} obras publicadas · {rows.filter(b=>b.status!=="published").length} fora do catálogo</p></div><div className="tabs"><button disabled={importing} onClick={()=>{setTab("catalog");reload();}}>Acervo</button><button disabled={importing} onClick={()=>setTab("imports")}>Importar e revisar</button><button disabled={importing} onClick={()=>setTab("bulk")}>Subir ebooks em lote</button><button disabled={importing} onClick={()=>setTab("beta")}>Acompanhar beta</button></div>{error&&<div role="alert"><p>{error}</p><button onClick={reload}>Tentar novamente</button></div>}
+    {tab==="beta"?<BetaDashboard/>:(tab==="imports"||tab==="bulk")?<ImportCenter onBusy={setImporting} key={tab} initialMode={tab==="bulk"?"quick":"individual"} owner={owner} notify={message=>{notify(message);reload();}}/>:<>{!rows.length&&!error&&<p>Importe e revise o primeiro ebook para iniciar o acervo.</p>}<div className="admin-table-wrap catalog-admin-table"><table><thead><tr><th>Livro</th><th>Autor</th><th>Situação</th><th>Ação</th></tr></thead><tbody>{rows.map(b=><tr key={b.id}><td data-label="Livro">{b.title}</td><td data-label="Autor">{b.author}</td><td data-label="Situação">{b.status==="published"?"Publicado":"Fora do catálogo"}</td><td data-label="Ação"><button className="outline" onClick={()=>{setEditing(b);setDeleteOpen(false);setConfirmTitle("");}}>Editar</button></td></tr>)}</tbody></table></div></>}
+    {editing&&<div className="modal-backdrop"><section className="book-modal" role="dialog" aria-modal="true" aria-labelledby="edit-title"><h2 id="edit-title">Editar obra</h2><form className="beta-form" onSubmit={async e=>{e.preventDefault();const mediaForm=new FormData(e.currentTarget);setBusy(true);try{await requestJson("/api/admin/books",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(editing)});for(const kind of ["cover","epub"]){const file=mediaForm.get(kind);if(file instanceof File&&file.size){const media=new FormData();media.set("file",file);media.set("kind",kind);media.set("bookId",editing.id);await requestJson("/api/media",{method:"POST",body:media});}}await reload();setEditing(null);notify("Obra atualizada.");}catch(e){notify((e as Error).message);}finally{setBusy(false);}}}><label>Título<input value={editing.title} required onChange={e=>setEditing({...editing,title:e.target.value})}/></label><label>Autor<input value={editing.author} required onChange={e=>setEditing({...editing,author:e.target.value})}/></label><label>Gênero<input value={editing.genre} required onChange={e=>setEditing({...editing,genre:e.target.value})}/></label><label>Sinopse<textarea value={editing.description} required onChange={e=>setEditing({...editing,description:e.target.value})}/></label><label>Substituir capa (opcional)<input type="file" name="cover" accept="image/jpeg,image/png,image/webp"/></label><label>Substituir ebook (opcional, até 32 MB)<input type="file" name="epub" accept="application/epub+zip,application/pdf"/></label><label>Visibilidade<select value={editing.status} onChange={e=>setEditing({...editing,status:e.target.value})}><option value="published">Publicado</option><option value="draft">Despublicado</option><option value="archived">Arquivado</option></select></label><section className="ebook-delete-area"><h3>Excluir ebook</h3><p>Remove o ebook do acervo e bloqueia novas leituras. Os arquivos de origem e o histórico permanecem guardados.</p>{deleteOpen?<><label>Digite o título atual para confirmar: <strong>{rows.find(book=>book.id===editing.id)?.title}</strong><input autoComplete="off" value={confirmTitle} disabled={busy} onChange={event=>setConfirmTitle(event.target.value)}/></label><button type="button" className="ebook-delete-button" disabled={busy||confirmTitle!==rows.find(book=>book.id===editing.id)?.title} onClick={async()=>{setBusy(true);try{await requestJson("/api/admin/books",{method:"DELETE",headers:{"content-type":"application/json"},body:JSON.stringify({id:editing.id,confirmTitle})});setEditing(null);setDeleteOpen(false);await reload();notify("Ebook excluído do acervo.");}catch(error){notify((error as Error).message);}finally{setBusy(false);}}}>{busy?"Excluindo…":"Confirmar exclusão"}</button><button type="button" className="outline" disabled={busy} onClick={()=>{setDeleteOpen(false);setConfirmTitle("");}}>Manter ebook</button></>:<button type="button" className="ebook-delete-button" disabled={busy} onClick={()=>setDeleteOpen(true)}>Excluir ebook</button>}</section><div><button type="button" disabled={busy} className="outline" onClick={()=>setEditing(null)}>Cancelar</button><button disabled={busy} className="primary">{busy?"Salvando…":"Salvar alterações"}</button></div></form></section></div>}
+  </>;
 }
 
 type ImportBatch = {
@@ -3084,42 +267,45 @@ type StagedBook = {
   status: string;
 };
 
-function ImportCenter({ notify }: { notify: (message: string) => void }) {
+function ImportCenter({ notify, owner, onBusy, initialMode="individual" }: { onBusy:(busy:boolean)=>void; notify: (message: string) => void; owner: string; initialMode?:"individual"|"quick" }) {
   const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [items, setItems] = useState<StagedBook[]>([]);
   const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState<"individual" | "batch">("individual");
+  useEffect(()=>{onBusy(busy);return()=>onBusy(false);},[busy,onBusy]);
+  const [mode, setMode] = useState<"individual" | "batch" | "quick">(initialMode);
+  const [queue,setQueue]=useState<{file:File;status:string;uploaded?:ApiPayload;registered?:boolean}[]>([]);
+  const queueRef=useRef(queue);
+  const updateQueue=(next:typeof queue)=>{queueRef.current=next;setQueue(next);};
+  const updateFile=(index:number,patch:Partial<(typeof queue)[number]>)=>updateQueue(queueRef.current.map((item,i)=>i===index?{...item,...patch}:item));
+  useEffect(()=>{if(!busy)return;const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue="";};window.addEventListener("beforeunload",warn);return()=>window.removeEventListener("beforeunload",warn);},[busy]);
   const [folderPath, setFolderPath] = useState("");
   const [selected, setSelected] = useState<StagedBook | null>(null);
   const [uploadStage, setUploadStage] = useState("");
 
   async function load() {
-    const response = await fetch("/api/admin/imports");
-    if (!response.ok) return;
-    const data = await response.json();
+    const response = await apiFetch("/api/admin/imports");
+    if (!response.ok) throw new Error("Não foi possível carregar as importações.");
+    const data = await response.json() as ApiPayload;
     setBatches(data.batches || []);
     setItems(data.items || []);
   }
   useEffect(() => {
-    // The request resolves asynchronously before it updates local UI state.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load().catch(() => undefined);
+    load().catch(error => notify(error.message));
   }, []);
 
-  async function uploadIndividual(file: File) {
-    const initResponse = await fetch("/api/admin/uploads?v=3", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        action: "init",
-        fileName: file.name,
-        contentType: file.type,
-        size: file.size,
-      }),
-    });
-    const initialized = await initResponse.json().catch(() => ({}));
-    if (!initResponse.ok)
-      throw new Error(initialized.error || `init_${initResponse.status}`);
+  async function uploadIndividual(file: File, progress?:(text:string)=>void) {
+    const limit = file.name.toLowerCase().endsWith(".epub") ? 32_000_000 : 250_000_000;
+    if (file.size > limit) throw new Error("Arquivo acima do limite: EPUB 32 MB; PDF 250 MB.");
+    const resumeKey = `sambu:upload:${owner}:${file.name}:${file.size}:${file.lastModified}`;
+    let resumed: { uploadId:string; chunkSize:number; nextPart:number } | null = null;
+    try { const candidate=JSON.parse(localStorage.getItem(resumeKey)||"null"); if(candidate && /^[a-f0-9-]{36}$/i.test(candidate.uploadId) && candidate.chunkSize===250000 && Number.isInteger(candidate.nextPart) && candidate.nextPart>=0 && candidate.nextPart<=Math.ceil(file.size/candidate.chunkSize)) resumed=candidate; } catch {}
+    let initialized: ApiPayload;
+    if (resumed) initialized = { ...resumed, batch: { validItems:0,errorItems:0 } };
+    else {
+      const initResponse = await apiFetch("/api/admin/uploads?v=3", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"init",fileName:file.name,contentType:file.type,size:file.size})});
+      initialized = await initResponse.json().catch(()=>({})) as ApiPayload;
+      if (!initResponse.ok) throw new Error(initialized.error || `init_${initResponse.status}`);
+    }
 
     function base64(buffer: ArrayBuffer) {
       const bytes = new Uint8Array(buffer);
@@ -3131,10 +317,12 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
 
     const chunkSize = Number(initialized.chunkSize);
     const totalParts = Math.ceil(file.size / chunkSize);
-    for (let part = 0; part < totalParts; part++) {
-      setUploadStage(`Enviando parte ${part + 1} de ${totalParts}…`);
+    for (let part = resumed?.nextPart || 0; part < totalParts; part++) {
+      setUploadStage(`Enviando ${file.name}… ${Math.round(part / totalParts * 100)}%`);progress?.(`Enviando · ${Math.round(part / totalParts * 100)}%`);
       const chunk = file.slice(part * chunkSize, (part + 1) * chunkSize);
-      const response = await fetch("/api/admin/uploads?v=3", {
+      let response: Response | undefined;
+      for (let attempt = 0; attempt < 3; attempt++) {
+      try { response = await apiFetch("/api/admin/uploads?v=3", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -3144,13 +332,19 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
           data: base64(await chunk.arrayBuffer()),
         }),
       });
-      const detail = await response.json().catch(() => ({}));
+      if (response.ok || response.status < 500) break;
+      } catch { if (attempt === 2) throw new Error("network_error"); }
+      await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)));
+      }
+      if (!response) throw new Error("network_error");
+      const detail = await response.json().catch(() => ({})) as ApiPayload;
       if (!response.ok)
         throw new Error(detail.error || `part_${part + 1}_${response.status}`);
+      try { localStorage.setItem(resumeKey,JSON.stringify({uploadId:initialized.uploadId,chunkSize,nextPart:part+1})); } catch {}
     }
 
-    setUploadStage("Finalizando o ebook…");
-    const completeResponse = await fetch("/api/admin/uploads?v=3", {
+    setUploadStage("Finalizando o ebook…");progress?.("Finalizando arquivo…");
+    const completeResponse = await apiFetch("/api/admin/uploads?v=3", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -3162,19 +356,35 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
         totalParts,
       }),
     });
-    const completed = await completeResponse.json().catch(() => ({}));
+    const completed = await completeResponse.json().catch(() => ({})) as ApiPayload;
     if (!completeResponse.ok)
       throw new Error(completed.error || `complete_${completeResponse.status}`);
+    try { localStorage.removeItem(resumeKey); } catch {}
     return completed;
   }
 
   async function importBatch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if(busy)return;
     setBusy(true);
     const form = event.currentTarget;
     setUploadStage(mode === "individual" ? "Preparando o ebook…" : "Processando lote…");
     try {
       const requestForm = new FormData(form);
+      if(mode==="quick"){
+        if(!queueRef.current.length)throw new Error("Selecione ao menos um EPUB ou PDF.");
+        for(let i=0;i<queueRef.current.length;i++){
+          const item=queueRef.current[i];if(item.registered||item.uploaded)continue;
+          try{const uploaded=await uploadIndividual(item.file,status=>updateFile(i,{status}));updateFile(i,{uploaded,status:"Enviado · aguardando registro"});}
+          catch(error){updateFile(i,{status:`Falha: ${(error as Error).message}`});}
+        }
+        const ready=queueRef.current.filter(item=>item.uploaded&&!item.registered);
+        if(!ready.length)throw new Error("Nenhum novo arquivo enviado. Confira os erros abaixo.");
+        const rows=ready.map(item=>({title:item.file.name.replace(/\.(epub|pdf)$/i,""),author:"",licenseType:"",fileName:item.uploaded!.fileName}));
+        requestForm.set("mode","batch");
+        requestForm.set("manifest",new File([JSON.stringify(rows)],"livros.json",{type:"application/json"}));
+        requestForm.set("uploadedFiles",JSON.stringify(ready.map(item=>item.uploaded)));
+      }
       if (mode === "individual") {
         const file = requestForm.get("singleFile");
         if (!(file instanceof File) || !file.size)
@@ -3184,19 +394,20 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
         requestForm.set("uploadedFiles", JSON.stringify([uploaded]));
       }
       setUploadStage("Registrando na fila de revisão…");
-      const response = await fetch("/api/admin/imports?v=3", {
+      const response = await apiFetch("/api/admin/imports?v=3", {
         method: "POST",
         body: requestForm,
       });
-      const data = await response.json().catch(() => ({}));
+      const data = await response.json().catch(() => ({})) as ApiPayload;
       if (!response.ok)
         throw new Error(data.error || `import_${response.status}`);
+      if(mode==="quick")updateQueue(queueRef.current.map(item=>item.uploaded?{...item,registered:true,status:"Na fila de revisão"}:item));
       notify(
         mode === "individual"
           ? `Livro recebido: ${data.batch.validItems} válido e ${data.batch.errorItems} para revisar.`
           : `Lote recebido: ${data.batch.validItems} válidos e ${data.batch.errorItems} para revisar.`,
       );
-      form.reset();
+      if(mode!=="quick")form.reset();
       setFolderPath("");
       await load();
     } catch (error) {
@@ -3214,34 +425,6 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
     }
   }
 
-  async function seed() {
-    setBusy(true);
-    const response = await fetch("/api/admin/imports", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "seed" }),
-    });
-    notify(
-      response.ok
-        ? "Banco temporário criado com 8 livros de demonstração."
-        : "Entre na conta administrativa para criar a base de testes.",
-    );
-    if (response.ok) await load();
-    setBusy(false);
-  }
-
-  async function clearTest() {
-    if (!window.confirm("Remover todos os lotes e livros temporários?")) return;
-    setBusy(true);
-    const response = await fetch("/api/admin/imports", { method: "DELETE" });
-    if (response.ok) {
-      setBatches([]);
-      setItems([]);
-      notify("Banco temporário limpo com sucesso.");
-    }
-    setBusy(false);
-  }
-
   async function reviewBook(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected) return;
@@ -3256,11 +439,12 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
       form.get("rightsConfirmed") === "on" ? "true" : "false",
     );
     setBusy(true);
-    const response = await fetch("/api/admin/imports", {
+    try {
+    const response = await apiFetch("/api/admin/imports", {
       method: "PATCH",
       body: form,
     });
-    const data = await response.json().catch(() => ({}));
+    const data = await response.json().catch(() => ({})) as ApiPayload;
     if (response.ok) {
       notify(
         action === "publish"
@@ -3277,25 +461,26 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
           ? "Preencha os campos obrigatórios e confirme os direitos de publicação."
           : data.error === "book_file_required"
             ? "O arquivo do ebook é obrigatório para publicar."
-            : "Não foi possível salvar a revisão.",
+            : messages[data.error || ""] || "Não foi possível salvar a revisão.",
       );
     }
-    setBusy(false);
+    } catch(error) { notify((error as Error).message || "Falha de conexão. Tente novamente."); } finally { setBusy(false); }
   }
 
   async function deleteBook(item: StagedBook) {
-    if (!window.confirm(`Excluir a importação de “${item.title}”?`)) return;
+    if (!window.confirm(`Arquivar a importação de “${item.title}”?`)) return;
     setBusy(true);
-    const response = await fetch(
+    try {
+    const response = await apiFetch(
       `/api/admin/imports?id=${encodeURIComponent(item.id)}`,
       { method: "DELETE" },
     );
     if (response.ok) {
-      notify("Importação excluída.");
+      notify("Importação arquivada. Os arquivos foram preservados.");
       setSelected(null);
       await load();
     } else notify("Não foi possível excluir esta importação.");
-    setBusy(false);
+    } catch(error) { notify((error as Error).message || "Falha de conexão. Tente novamente."); } finally { setBusy(false); }
   }
 
   return (
@@ -3310,16 +495,10 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
           </p>
         </div>
         <div className="test-database">
-          <span>AMBIENTE ISOLADO</span>
-          <b>Banco temporário</b>
-          <p>Registros expiram em 7 dias e não aparecem no catálogo público.</p>
+          <span>REVISÃO DE CONTEÚDO</span>
+          <b>Fila de revisão</b>
+          <p>Os arquivos aguardam revisão e não aparecem no catálogo antes da publicação.</p>
           <div>
-            <button className="primary" onClick={seed} disabled={busy}>
-              Gerar dados de teste
-            </button>
-            <button className="outline" onClick={clearTest} disabled={busy}>
-              Limpar base
-            </button>
           </div>
         </div>
       </div>
@@ -3331,7 +510,7 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
       >
         <button
           className={mode === "individual" ? "active" : ""}
-          onClick={() => setMode("individual")}
+          disabled={busy} onClick={() => setMode("individual")}
         >
           <span>01</span>
           <b>Livro individual</b>
@@ -3339,12 +518,13 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
         </button>
         <button
           className={mode === "batch" ? "active" : ""}
-          onClick={() => setMode("batch")}
+          disabled={busy} onClick={() => setMode("batch")}
         >
           <span>02</span>
-          <b>Importação em lote</b>
+          <b>Lote com planilha</b>
           <small>Selecione uma pasta</small>
         </button>
+        <button disabled={busy} className={mode==="quick"?"active":""} onClick={()=>setMode("quick")}><span>03</span><b>Subir ebooks em lote</b><small>Vários arquivos, sem planilha</small></button>
       </div>
 
       <div className="import-layout">
@@ -3355,12 +535,12 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
               <h3>
                 {mode === "individual"
                   ? "Importar livro ou ebook"
-                  : "Importar pasta de livros"}
+                  : mode==="quick"?"Subir ebooks em lote":"Importar pasta de livros"}
               </h3>
               <small>
                 {mode === "individual"
-                  ? "EPUB, PDF ou TXT"
-                  : "Pasta com CSV/JSON + arquivos"}
+                  ? "EPUB ou PDF"
+                  : mode==="quick"?"Até 50 arquivos EPUB ou PDF":"Pasta com CSV/JSON + arquivos"}
               </small>
             </div>
             <span className="step-badge">
@@ -3368,9 +548,10 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
             </span>
           </div>
           <label>
-            <span>Fonte do acervo</span>
+            <span>Origem da obra</span>
             <select name="source">
-              <option>Portal Domínio Público</option>
+              <option>Sambu Ebooks</option>
+                  <option>Portal Domínio Público</option>
               <option>Standard Ebooks</option>
               <option>Project Gutenberg</option>
               <option>Biblioteca Nacional</option>
@@ -3378,7 +559,16 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
               <option>Autores parceiros</option>
             </select>
           </label>
-          {mode === "individual" ? (
+          {mode==="quick"?<>
+            <label>Nome do lote<input name="name" required disabled={busy} placeholder="Novos livros — setembro"/></label>
+            <label className="drop-field featured-drop"><b>Selecionar ebooks</b><span>EPUB até 32 MB · PDF até 250 MB por arquivo</span><input type="file" accept=".epub,.pdf" multiple disabled={busy} onChange={event=>{
+              const files=Array.from(event.target.files||[]);
+              if(files.length>50||files.some(f=>!f.size||! /\.(epub|pdf)$/i.test(f.name))||new Set(files.map(f=>f.name.toLowerCase())).size!==files.length){notify("Selecione até 50 EPUBs ou PDFs não vazios, com nomes diferentes.");event.target.value="";return;}
+              updateQueue(files.map(file=>({file,status:"Aguardando envio"})));
+            }}/></label>
+            <p>O nome do arquivo será usado como título inicial. Confira autor, capa e licença na revisão. Mantenha esta tela aberta durante o envio.</p>
+            {!!queue.length&&<div className="bulk-upload-list" aria-live="polite"><p>{queue.length} arquivos · {queue.filter(item=>item.registered).length} na revisão</p>{queue.map((item,i)=><div className="bulk-upload-row" key={i}><strong>{item.file.name}</strong><small>{(item.file.size/1000000).toFixed(1)} MB</small><span>{item.status}</span>{!busy&&!item.registered&&!item.uploaded&&<button type="button" className="outline" onClick={()=>updateQueue(queueRef.current.filter((_,index)=>index!==i))}>Remover</button>}</div>)}</div>}
+          </>:mode === "individual" ? (
             <>
               <div className="individual-fields">
                 <label>
@@ -3427,11 +617,11 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
               </label>
               <label className="drop-field featured-drop">
                 <b>Selecione o livro ou ebook *</b>
-                <span>Um arquivo EPUB, PDF ou TXT de até 40 MB</span>
+                <span>EPUB até 32 MB ou PDF até 250 MB</span>
                 <input
                   name="singleFile"
                   type="file"
-                  accept=".epub,.pdf,.txt"
+                  accept=".epub,.pdf"
                   required
                 />
               </label>
@@ -3449,7 +639,7 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
               <label className="drop-field folder-field">
                 <b>Escolher pasta do acervo</b>
                 <span>
-                  Inclua a planilha CSV/JSON e até 50 arquivos EPUB, PDF ou TXT
+                  Inclua a planilha CSV/JSON e até 50 arquivos EPUB ou PDF
                 </span>
                 <input
                   name="folderFiles"
@@ -3494,7 +684,7 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
                   <input
                     name="files"
                     type="file"
-                    accept=".epub,.pdf,.txt"
+                    accept=".epub,.pdf"
                     multiple
                   />
                 </label>
@@ -3508,12 +698,12 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
               </div>
             </>
           )}
-          <button className="primary import-submit" disabled={busy}>
+          <button className="primary import-submit" disabled={busy||(mode==="quick"&&(!queue.length||queue.every(item=>item.registered)))}>
             {busy
               ? uploadStage || "Processando…"
               : mode === "individual"
                 ? "Validar e importar livro"
-                : "Validar e importar pasta"}
+                : mode==="quick"?"Enviar pendentes para revisão":"Validar e importar pasta"}
           </button>
         </form>
 
@@ -3602,7 +792,7 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
           </div>
           <span>{items.length} registros</span>
         </div>
-        <div className="admin-table-wrap">
+        <div className="admin-table-wrap" role="region" aria-label="Importações — deslize para ver todas as colunas" tabIndex={0}>
           <table>
             <thead>
               <tr>
@@ -3731,7 +921,7 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
                 </label>
                 <label>
                   <span>Capa</span>
-                  <input name="cover" type="file" accept="image/*" />
+                  <input name="cover" type="file" accept="image/jpeg,image/png,image/webp" />
                 </label>
                 <label className="wide">
                   <span>Observação para correção</span>
@@ -3745,6 +935,7 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
               </div>
 
               <aside className="file-review">
+                <EditorialCheck id={selected.id}/>
                 <div className="cover-check">
                   <span>{selected.coverKey ? "✓" : "+"}</span>
                   <b>{selected.coverKey ? "Capa recebida" : "Capa pendente"}</b>
@@ -3761,7 +952,7 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
                   {selected.fileName && (
                     <a
                       className="outline preview-link"
-                      href={`/api/admin/imports?file=${encodeURIComponent(selected.id)}`}
+                      href={serviceUrl(`/api/admin/imports?file=${encodeURIComponent(selected.id)}`)}
                       target="_blank"
                       rel="noreferrer"
                     >
@@ -3799,13 +990,14 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
                 onClick={() => deleteBook(selected)}
                 disabled={busy}
               >
-                Excluir importação
+                Arquivar importação
               </button>
               <div>
                 <button
                   type="submit"
                   name="action"
                   value="correction"
+                  formNoValidate
                   className="outline"
                   disabled={busy}
                 >
@@ -3815,6 +1007,7 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
                   type="submit"
                   name="action"
                   value="draft"
+                  formNoValidate
                   className="outline"
                   disabled={busy}
                 >
@@ -3835,155 +1028,5 @@ function ImportCenter({ notify }: { notify: (message: string) => void }) {
         </div>
       )}
     </section>
-  );
-}
-
-function CommercialRules() {
-  return (
-    <section className="commercial-rules">
-      <div className="admin-module commercial-intro">
-        <div>
-          <p className="eyebrow coral">REGRAS COMERCIAIS</p>
-          <h2>Planos e controle de acesso</h2>
-          <p>
-            Estrutura pronta para receber o Mercado Pago. Até a integração, os
-            planos podem ser reservados sem cobrança real.
-          </p>
-        </div>
-        <div className="rule-highlights">
-          <article>
-            <span>7</span>
-            <b>Dias de teste</b>
-            <small>Somente no primeiro cadastro Imersivo.</small>
-          </article>
-          <article>
-            <span>1</span>
-            <b>Capítulo gratuito</b>
-            <small>Quantidade configurável em cada obra.</small>
-          </article>
-          <article>
-            <span>✓</span>
-            <b>Compra definitiva</b>
-            <small>Ebook avulso permanece na biblioteca.</small>
-          </article>
-        </div>
-      </div>
-      <div className="access-matrix admin-card">
-        <div className="card-head">
-          <div>
-            <h3>Matriz de acesso</h3>
-            <small>Política definida para a integração de pagamentos</small>
-          </div>
-          <span>4 modalidades</span>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Modalidade</th>
-              <th>Preço</th>
-              <th>Acesso</th>
-              <th>Cancelamento</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>
-                <b>Gratuito</b>
-              </td>
-              <td>R$ 0</td>
-              <td>Amostras e capítulos liberados</td>
-              <td>Não se aplica</td>
-            </tr>
-            <tr>
-              <td>
-                <b>Imersivo mensal</b>
-              </td>
-              <td>R$ 29,90/mês</td>
-              <td>Catálogo ilimitado</td>
-              <td>Acesso até o fim do ciclo</td>
-            </tr>
-            <tr>
-              <td>
-                <b>Imersivo anual</b>
-              </td>
-              <td>R$ 238,80/ano</td>
-              <td>Catálogo ilimitado</td>
-              <td>Acesso até o fim da vigência</td>
-            </tr>
-            <tr>
-              <td>
-                <b>Compra avulsa</b>
-              </td>
-              <td>A partir de R$ 9,90</td>
-              <td>Livro adquirido permanentemente</td>
-              <td>Conforme política de reembolso</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function AdminPipeline() {
-  return (
-    <section className="admin-card">
-      <div className="card-head">
-        <h3>Fluxo editorial</h3>
-        <span>8 pendências</span>
-      </div>
-      {[
-        ["Revisão de texto", "3"],
-        ["Direitos autorais", "2"],
-        ["QA de áudio", "2"],
-        ["Classificação", "1"],
-      ].map(([x, n]) => (
-        <div className="queue" key={x}>
-          <span>{n}</span>
-          <div>
-            <b>{x}</b>
-            <small>Requer validação</small>
-          </div>
-          <button>→</button>
-        </div>
-      ))}
-    </section>
-  );
-}
-function AdminModule({
-  title,
-  text,
-  stats,
-}: {
-  title: string;
-  text: string;
-  stats: string[];
-}) {
-  return (
-    <section className="admin-module">
-      <div>
-        <p className="eyebrow coral">MÓDULO OPERACIONAL</p>
-        <h2>{title}</h2>
-        <p>{text}</p>
-      </div>
-      <div>
-        {stats.map((s, i) => (
-          <article key={s}>
-            <span>{["◈", "◎", "↗"][i]}</span>
-            <b>{s}</b>
-          </article>
-        ))}
-      </div>
-      <button className="outline">Configurar módulo →</button>
-    </section>
-  );
-}
-function Kpi({ label, value }: { label: string; value: string }) {
-  return (
-    <article className="kpi">
-      <span>{label}</span>
-      <b>{value}</b>
-      <small>↗ 12,4% no mês</small>
-    </article>
   );
 }
