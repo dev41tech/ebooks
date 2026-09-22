@@ -23,5 +23,12 @@ test('VPS migration preserves existing categories, drafts and progress; reruns s
   const book=(await pg.query('SELECT category_main,categories_secondary FROM books')).rows[0];assert.deepEqual(book,{category_main:'literatura',categories_secondary:['romance']});
   assert.equal((await pg.query('SELECT theme FROM ebook_drafts')).rows[0].theme,'Theme');
   assert.deepEqual((await pg.query('SELECT progress,position,revision FROM reading_progress')).rows[0],{progress:47,position:0,revision:0});
+  await pg.exec(`INSERT INTO master_credentials(id,salt,password_hash,created_at) VALUES('master','test-salt','test-hash',0);
+    CREATE ROLE test_anon;
+    GRANT USAGE ON SCHEMA public TO test_anon;
+    GRANT SELECT ON master_credentials TO test_anon;
+    SET ROLE test_anon;`);
+  assert.equal((await pg.query('SELECT count(*)::int AS n FROM master_credentials')).rows[0].n,0,'RLS must hide credentials even if Supabase grants table access');
+  await pg.exec('RESET ROLE');
  }finally{await pg.close();}
 });

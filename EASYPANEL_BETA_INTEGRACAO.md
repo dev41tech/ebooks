@@ -10,6 +10,7 @@ Não faça merge das branches `sambu-beta-r26` ou `sambu-beta-r26-pr`: elas repr
 - Importação em lote com revisão editorial, upload em partes, permissões e exclusão lógica protegida.
 - Login existente do Supabase, PostgreSQL, campos de classificação, tabelas/APIs do Studio e Docker/Easypanel preservados. O Studio não ganhou funcionalidades novas nesta integração.
 - Storage privado do Supabase com leitura por intervalo e metadados de propriedade no PostgreSQL. A service role fica somente no servidor.
+- Novas tabelas privadas com RLS sem políticas para clientes; acesso pela conexão PostgreSQL do servidor/proprietário.
 - Migração aditiva, executada em transação, com trava e checksum. Não é executada automaticamente ao iniciar o aplicativo.
 - Progresso legado em porcentagem é convertido em posição aproximada na primeira abertura; as próximas gravações usam posição e revisão.
 

@@ -54,3 +54,21 @@ ALTER TABLE "reviews" ADD COLUMN "text_rating" integer;
 CREATE INDEX "feedback_owner_date_idx" ON "beta_feedback" USING btree ("user_email","created_at");
 --> statement-breakpoint
 CREATE INDEX "feedback_date_idx" ON "beta_feedback" USING btree ("created_at");
+
+--> statement-breakpoint
+ALTER TABLE "beta_feedback" ENABLE ROW LEVEL SECURITY;
+
+--> statement-breakpoint
+ALTER TABLE "discovery_searches" ENABLE ROW LEVEL SECURITY;
+
+--> statement-breakpoint
+ALTER TABLE "master_attempts" ENABLE ROW LEVEL SECURITY;
+
+--> statement-breakpoint
+ALTER TABLE "master_credentials" ENABLE ROW LEVEL SECURITY;
+
+--> statement-breakpoint
+ALTER TABLE "master_sessions" ENABLE ROW LEVEL SECURITY;
+
+--> statement-breakpoint
+ALTER TABLE "storage_metadata" ENABLE ROW LEVEL SECURITY;

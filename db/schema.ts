@@ -307,24 +307,24 @@ export const masterCredentials = pgTable("master_credentials", {
   salt: text("salt").notNull(),
   passwordHash: text("password_hash").notNull(),
   createdAt: bigint("created_at", {mode:"number"}).notNull(),
-});
+}).enableRLS();
 export const masterSessions = pgTable("master_sessions", {
   tokenHash: text("token_hash").primaryKey(),
   email: text("email").notNull(),
   expiresAt: bigint("expires_at", {mode:"number"}).notNull(),
-});
+}).enableRLS();
 export const masterAttempts = pgTable("master_attempts", {
   email: text("email").primaryKey(),
   attempts: integer("attempts").notNull(),
   windowStart: bigint("window_start", {mode:"number"}).notNull(),
-});
+}).enableRLS();
 
 export const discoverySearches = pgTable("discovery_searches", {
   id: text("id").primaryKey(),
   userEmail: text("user_email").notNull(),
   query: text("query").notNull(),
   createdAt: bigint("created_at", {mode:"number"}).notNull(),
-});
+}).enableRLS();
 
 export const betaFeedback = pgTable("beta_feedback", {
   id: text("id").primaryKey(),
@@ -339,6 +339,6 @@ export const betaFeedback = pgTable("beta_feedback", {
   status: text("status").notNull().default("open"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
-}, t=>[index("feedback_owner_date_idx").on(t.userEmail,t.createdAt),index("feedback_date_idx").on(t.createdAt)]);
+}, t=>[index("feedback_owner_date_idx").on(t.userEmail,t.createdAt),index("feedback_date_idx").on(t.createdAt)]).enableRLS();
 
-export const storageMetadata = pgTable("storage_metadata", {key:text("key").primaryKey(),metadata:jsonb("metadata").notNull(),updatedAt:text("updated_at").notNull()});
+export const storageMetadata = pgTable("storage_metadata", {key:text("key").primaryKey(),metadata:jsonb("metadata").notNull(),updatedAt:text("updated_at").notNull()}).enableRLS();
