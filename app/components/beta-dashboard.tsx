@@ -1,6 +1,7 @@
 'use client';
 import {useCallback,useEffect,useState} from 'react';
 import PilotPreparation from './pilot-preparation';
+import CatalogTransfer from './catalog-transfer';
 import {apiFetch} from '../lib/client-api';
 import {ISSUE_CATEGORIES,feedbackStatus} from '../lib/beta';
 type Report={id:string;bookTitle:string;category:keyof typeof ISSUE_CATEGORIES;message:string;chapterLabel:string;device:string;appVersion:string;status:keyof typeof feedbackStatus;createdAt:string};
@@ -10,7 +11,7 @@ export default function BetaDashboard(){
  const [data,setData]=useState<Data|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[filter,setFilter]=useState('pending');
  const load=useCallback(async()=>{setBusy(true);setError('');try{const r=await apiFetch('/api/admin/beta',{cache:'no-store'});if(!r.ok){if(r.status===403)window.dispatchEvent(new Event('sambu-master-locked'));throw new Error('Não foi possível atualizar o painel. Verifique seu acesso e tente novamente.');}setData(await r.json());}catch(e){setError((e as Error).message);}finally{setBusy(false);}},[]);
  useEffect(()=>{void load();},[load]);
- return <section className="beta-dashboard"><PilotPreparation/><div className="feedback-actions"><h2>Acompanhamento do beta</h2><button className="outline" disabled={busy} onClick={load}>{busy?'Atualizando…':'Atualizar indicadores'}</button></div>{error&&<p role="alert">{error}</p>}
+ return <section className="beta-dashboard"><PilotPreparation/><CatalogTransfer/><div className="feedback-actions"><h2>Acompanhamento do beta</h2><button className="outline" disabled={busy} onClick={load}>{busy?'Atualizando…':'Atualizar indicadores'}</button></div>{error&&<p role="alert">{error}</p>}
  {data&&<><p>Atividade dos últimos 14 dias. A coleta começa nesta atualização; os dias são contados em UTC.</p><div className="beta-metrics"><div><strong>{data.activity.activeReaders}</strong><span>Leitores que abriram livros</span></div><div><strong>{data.activity.returningReaders}</strong><span>Leram em dois ou mais dias</span></div><div><strong>{data.counts.unresolved}</strong><span>Relatos pendentes, desde o início</span></div><div><strong>{data.activity.activeReaders?`${Math.round(data.activity.returningReaders/data.activity.activeReaders*100)}%`:'—'}</strong><span>Retorno em outro dia no período</span></div></div>
  <h3>Leitura e qualidade por livro</h3><p>“Avançaram” e “Concluíram” usam o progresso atual de quem abriu o livro no período. Notas de 1 a 5 incluem todas as avaliações do beta. A lista mostra até 200 obras.</p><div className="admin-table-wrap"><table><thead><tr><th>Livro</th><th>Leitores</th><th>Avançaram ≥25%</th><th>Concluíram</th><th>História</th><th>Texto</th><th>Avaliações</th></tr></thead><tbody>{data.books.map(b=><tr key={b.id}><td>{b.title}</td><td>{b.readers}</td><td>{b.advanced}</td><td>{b.completed}</td><td>{b.storyRating??'—'}</td><td>{b.textRating??'—'}</td><td>{b.ratings}</td></tr>)}</tbody></table></div>
  <h3>Falhas registradas</h3><p>Uma ocorrência por conta, livro, tipo e dia. Falhas sem conexão podem não chegar ao painel.</p>{data.failures.length?<ul>{data.failures.map(f=><li key={f.event}>{errorNames[f.event]}: {f.count}</li>)}</ul>:<p>Nenhuma falha registrada no período.</p>}

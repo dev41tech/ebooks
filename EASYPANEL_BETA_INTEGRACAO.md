@@ -14,7 +14,19 @@ Não faça merge das branches `sambu-beta-r26` ou `sambu-beta-r26-pr`: elas repr
 - Migrações aditivas 0002 e 0003 executadas automaticamente antes de iniciar o container, em uma única transação, com trava e checksum. A 0002 ausente ou parcialmente aplicada é completada sem substituir dados. Reiniciar o container não repete migrações já registradas.
 - Progresso legado em porcentagem é convertido em posição aproximada na primeira abertura; as próximas gravações usam posição e revisão.
 
-Os dados e arquivos do site hospedado no ChatGPT NÃO são transportados por este PR. O acervo utilizado será o do PostgreSQL/Storage configurado na VPS. A transferência do acervo do Sites precisa de operação própria. Web e navegador mobile usam o mesmo aplicativo; esta branch não é um pacote publicado na App Store/Play Store.
+Os dados e arquivos do site hospedado no ChatGPT NÃO são transportados pelo GitHub. O acervo utilizado será o do PostgreSQL/Storage configurado na VPS. Para transferir o acervo do Sites, use a importação de backup descrita abaixo. Web e navegador mobile usam o mesmo aplicativo; esta branch não é um pacote publicado na App Store/Play Store.
+
+## Importar o acervo da versão de teste
+
+1. Implante a `main` atual no Easypanel usando o Dockerfile do repositório.
+2. No aplicativo da VPS, entre como proprietário, desbloqueie a senha master e abra **Administração → Acompanhar beta → Importar acervo do backup**.
+3. Selecione o ZIP baixado em **Baixar backup de dados e acervo** na versão de origem. Confira a lista e clique em **Importar livros e capas**.
+4. Mantenha a página aberta. Cada EPUB é enviado em partes e validado antes da publicação. Em caso de interrupção, selecione o mesmo ZIP e tente novamente; livros concluídos são identificados pelo ID e não são duplicados.
+5. Ao concluir, clique em **Ver livros no aplicativo** e confira capas e leitura. A importação é comum à versão web e ao navegador mobile.
+
+O importador recebe backups Sambu de até 100 MB com até 200 livros publicados em EPUB com capas embutidas. Recusa formatos não atendidos, arquivos ausentes e conflitos com registros existentes. Preserva os IDs, sinopses, autores, classificações e datas. A reexecução não sobrescreve livros existentes nem reativa livros excluídos. Apenas o proprietário com sessão master pode concluir a transferência, com validação da origem da requisição, propriedade do upload e SHA-256 do EPUB.
+
+O ZIP é lido no navegador; somente os livros publicados são enviados ao Storage privado. Contas, permissões, histórico pessoal e demais tabelas do backup não são importados. Não coloque o ZIP, EPUBs ou dados pessoais no GitHub. Capítulos de leitura são regenerados pelo leitor da VPS; a capa é extraída do EPUB. Este fluxo não substitui uma restauração completa do banco.
 
 ## Variáveis de ambiente
 

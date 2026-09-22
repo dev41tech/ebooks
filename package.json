@@ -18,7 +18,7 @@
     "start:vps": "node dist/standalone/server.js",
     "typecheck": "tsc --noEmit",
     "test:integration": "node --test tests/vps.integration.test.mjs tests/migration.test.mjs",
-    "test:client": "node --test tests/client-api.test.mjs tests/reader-blocks.test.mjs",
+    "test:client": "node --test tests/client-api.test.mjs tests/reader-blocks.test.mjs tests/catalog-transfer.test.mjs",
     "db:migrate:vps": "node scripts/migrate-vps.mjs"
   },
   "dependencies": {
