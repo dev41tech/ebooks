@@ -1,5 +1,6 @@
 import {
   integer,
+  index,
   sqliteTable,
   text,
   uniqueIndex,
@@ -110,7 +111,7 @@ export const analyticsEvents = sqliteTable("analytics_events", {
   chapterId: text("chapter_id"),
   metadata: text("metadata", { mode: "json" }),
   createdAt: text("created_at").notNull(),
-});
+}, t=>[index("analytics_event_date_idx").on(t.event,t.createdAt),index("analytics_book_owner_event_idx").on(t.bookId,t.userEmail,t.event,t.createdAt)]);
 export const subscriptions = sqliteTable(
   "subscriptions",
   {
@@ -137,6 +138,7 @@ export const reviews = sqliteTable(
     userEmail: text("user_email").notNull(),
     bookId: text("book_id").notNull(),
     rating: integer("rating").notNull(),
+    textRating: integer("text_rating"),
     comment: text("comment"),
     status: text("status").notNull().default("published"),
     createdAt: text("created_at").notNull(),
@@ -258,3 +260,18 @@ export const discoverySearches = sqliteTable("discovery_searches", {
   query: text("query").notNull(),
   createdAt: integer("created_at").notNull(),
 });
+
+export const betaFeedback = sqliteTable("beta_feedback", {
+  id: text("id").primaryKey(),
+  userEmail: text("user_email").notNull(),
+  bookId: text("book_id").notNull(),
+  category: text("category").notNull(),
+  message: text("message").notNull(),
+  chapterLabel: text("chapter_label"),
+  position: integer("position").notNull().default(0),
+  appVersion: text("app_version").notNull(),
+  device: text("device").notNull(),
+  status: text("status").notNull().default("open"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, t=>[index("feedback_owner_date_idx").on(t.userEmail,t.createdAt),index("feedback_date_idx").on(t.createdAt)]);

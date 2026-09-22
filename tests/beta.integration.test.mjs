@@ -36,7 +36,7 @@ before(async()=>{
    for(const statement of sql.split(';').map(s=>s.replace(/--> statement-breakpoint/g,'').trim()).filter(Boolean))await db.prepare(statement).run();
  }
  const runtimePath=path.join(root,'tests/test-runtime.mjs');
- for(const [name,file] of Object.entries({books:'admin/books',imports:'admin/imports',catalog:'catalog',content:'catalog/content',file:'catalog/file',favorites:'favorites',progress:'progress',profile:'profile',subscription:'subscription',master:'admin/master',recommendations:'recommendations'})) {
+ for(const [name,file] of Object.entries({books:'admin/books',imports:'admin/imports',catalog:'catalog',content:'catalog/content',file:'catalog/file',favorites:'favorites',progress:'progress',profile:'profile',subscription:'subscription',master:'admin/master',recommendations:'recommendations',feedback:'feedback',reviews:'reviews',analytics:'analytics',beta:'admin/beta'})) {
   const outfile=path.join(output,`${name}.mjs`);
   await build({entryPoints:[path.join(root,`app/api/${file}/route.ts`)],outfile,bundle:true,platform:'node',format:'esm',packages:'external',plugins:[{name:'isolated-runtime',setup(b){b.onResolve({filter:/^(cloudflare:workers|next\/headers|next\/navigation)$/},()=>({path:runtimePath,external:true}));}}]});
   routes[name]=await import(pathToFileURL(outfile));
@@ -269,4 +269,78 @@ test('chapter reads transfer 100 of 4000 paragraphs, preserve global positions a
  const revised=await (await routes.content.GET(new Request(`https://sambu.test/api?id=${bookId}&chapter=0`))).json();assert.equal(revised.reader.chapter.blocks[0].text,'Texto corrigido para a nova edição.');
  identity.email=null;assert.equal((await routes.content.GET(new Request(`https://sambu.test/api?id=${bookId}&chapter=0`))).status,401);
  identity.email=reader;await db.prepare("UPDATE books SET status='archived' WHERE id=?").bind(bookId).run();assert.equal((await routes.content.GET(new Request(`https://sambu.test/api?id=${bookId}&chapter=0`))).status,404);
+});
+
+
+test('beta feedback requires identity, validates input, is idempotent and stays admin-only',async()=>{
+ await db.prepare("UPDATE books SET status='published' WHERE id=?").bind(publishedId).run();
+ const report={id:crypto.randomUUID(),bookId:publishedId,category:'chapter',message:'O capítulo apresenta um título repetido.',chapterLabel:'Capítulo 1',position:2,device:'mobile'};
+ identity.email=null;assert.equal((await routes.feedback.POST(payload(report))).status,401);
+ identity.email=reader;
+ assert.equal((await routes.feedback.POST(payload({...report,message:'curto'}))).status,400);
+ assert.equal((await routes.feedback.POST(payload(report))).status,201);
+ assert.equal((await routes.feedback.POST(payload(report))).status,200);
+ assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM beta_feedback').first()).n,1);
+ assert.equal((await routes.beta.GET()).status,403);
+ assert.equal((await routes.beta.PATCH(payload({id:report.id,status:'resolved'},'PATCH'))).status,403);
+ identity.email=admin;identity.cookie='';await db.prepare('DELETE FROM master_attempts').run();
+ const login=await routes.master.POST(masterRequest('login'));identity.cookie=login.headers.get('set-cookie').split(';')[0];
+ const dashboard=await (await routes.beta.GET()).json();assert.equal(dashboard.counts.unresolved,1);
+ assert.equal(dashboard.feedback[0].message,report.message);assert.equal('user_email' in dashboard.feedback[0],false);
+ assert.equal((await routes.beta.PATCH(payload({id:report.id,status:'invalid'},'PATCH'))).status,400);
+ assert.equal((await routes.beta.PATCH(payload({id:report.id,status:'resolved'},'PATCH'))).status,200);
+ assert.equal((await (await routes.beta.GET()).json()).counts.unresolved,0);
+ identity.email=reader;
+ for(let i=0;i<9;i++)assert.equal((await routes.feedback.POST(payload({...report,id:crypto.randomUUID()}))).status,201);
+ assert.equal((await routes.feedback.POST(payload({...report,id:crypto.randomUUID()}))).status,429);
+});
+
+test('book ratings are private, bounded, persistent and update rather than duplicate',async()=>{
+ identity.email=reader;
+ assert.equal((await routes.reviews.POST(payload({bookId:publishedId,rating:6,textRating:4,comment:''}))).status,400);
+ assert.equal((await routes.reviews.POST(payload({bookId:publishedId,rating:4,textRating:3,comment:'Boa história.'}))).status,200);
+ assert.equal((await routes.reviews.POST(payload({bookId:publishedId,rating:5,textRating:4,comment:'Gostei do final.'}))).status,200);
+ const own=await (await routes.reviews.GET(new Request(`https://sambu.test/api?bookId=${publishedId}`))).json();assert.equal(own.review.rating,5);
+ identity.email=admin;assert.equal((await (await routes.reviews.GET(new Request(`https://sambu.test/api?bookId=${publishedId}`))).json()).review,null);
+ assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM reviews WHERE book_id=?').bind(publishedId).first()).n,1);
+});
+
+test('beta metrics deduplicate repeat opens and measure distinct-day returns without fabricated history',async()=>{
+ identity.email=reader;
+ const event={event:'reader_opened',bookId:publishedId};
+ assert.equal((await routes.analytics.POST(payload(event))).status,201);await routes.analytics.POST(payload(event));
+ assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM analytics_events WHERE event='reader_opened'").first()).n,1);
+ assert.equal((await routes.analytics.POST(payload({...event,event:'invented'}))).status,400);
+ identity.email=null;assert.equal((await routes.analytics.POST(payload(event))).status,401);
+ await db.prepare('INSERT INTO analytics_events(id,user_email,event,book_id,created_at) VALUES(?,?,?,?,?)').bind('yesterday',reader,'reader_opened',publishedId,new Date(Date.now()-86400000).toISOString()).run();
+ identity.email=admin;
+ const data=await (await routes.beta.GET()).json();assert.equal(data.activity.activeReaders,1);assert.equal(data.activity.returningReaders,1);
+ assert.equal(data.books.find(b=>b.id===publishedId).readers,1);assert.equal(data.books.find(b=>b.id===publishedId).ratings,1);
+});
+
+test('editorial check is read-only and publication stores automatic warnings',async()=>{
+ identity.email=admin;
+ const id=await stage('imports/direct/editorial.epub');
+ const before=await db.prepare('SELECT status FROM staging_books WHERE id=?').bind(id).first();
+ const check=await routes.imports.PATCH(formRequest({id,action:'check',title:'Título',author:'Autor'}));assert.equal(check.status,200);
+ const report=(await check.json()).report;assert.equal(report.errors.length,0);assert.equal(report.sections,1);assert.ok(report.warnings.some(w=>w.includes('Capa')));assert.ok(report.warnings.some(w=>w.includes('Sumário')));
+ assert.deepEqual(await db.prepare('SELECT status FROM staging_books WHERE id=?').bind(id).first(),before);
+ assert.equal((await routes.imports.PATCH(review(id))).status,200);
+ const stored=JSON.parse((await db.prepare('SELECT validation_errors AS value FROM staging_books WHERE id=?').bind(id).first()).value);assert.ok(stored.length>0);
+ identity.email=reader;assert.equal((await routes.imports.PATCH(formRequest({id,action:'check'}))).status,403);
+});
+
+test('editorial alerts identify duplicated sections without rewriting source text',async()=>{
+ identity.email=admin;
+ const entries={
+ 'META-INF/container.xml':strToU8('<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>'),
+ 'book.opf':strToU8('<package><manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/><item id="b" href="b.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="a"/><itemref idref="b"/></spine></package>'),
+ 'a.xhtml':strToU8('<html><body><h1>Capítulo 1</h1><p>Palavra que foi que- brada no texto original.</p></body></html>'),
+ 'b.xhtml':strToU8('<html><body><h1>Capítulo 1</h1><p>Palavra que foi que- brada no texto original.</p></body></html>')};
+ const bytes=zipSync(entries),id=await stage('imports/direct/duplicate.epub',bytes);
+ const result=await (await routes.imports.PATCH(formRequest({id,action:'check',title:'Teste',author:'Autora'}))).json();
+ assert.ok(result.report.warnings.some(w=>w.includes('integralmente repetido')));
+ assert.ok(result.report.warnings.some(w=>w.includes('título(s)')));
+ assert.ok(result.report.warnings.some(w=>w.includes('hífen')));
+ assert.deepEqual(new Uint8Array(await (await env.BUCKET.get('imports/direct/duplicate.epub')).arrayBuffer()),bytes);
 });

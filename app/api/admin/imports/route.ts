@@ -1,3 +1,4 @@
+import {checkEbook,type EditorialReport} from "../../../lib/editorial-check";
 import { extractEpub } from "../../../lib/epub";
 import { env } from "cloudflare:workers";
 import { and, desc, eq, ne, or, isNull } from "drizzle-orm";
@@ -406,7 +407,7 @@ export async function PATCH(request: Request) {
   const form = await request.formData();
   const id = clean(form.get("id"), 80);
   const action = clean(form.get("action"), 30);
-  if (!id || !["draft", "correction", "publish"].includes(action))
+  if (!id || !["draft", "correction", "publish", "check"].includes(action))
     return Response.json({ error: "invalid_action" }, { status: 400 });
   const db = await getDb();
   const [item] = await db
@@ -429,7 +430,7 @@ export async function PATCH(request: Request) {
   const now = new Date().toISOString();
   let coverKey = item.coverKey;
   const cover = form.get("cover");
-  if (cover instanceof File && cover.size) {
+  if (action !== "check" && cover instanceof File && cover.size) {
     if (!["image/png", "image/jpeg", "image/webp"].includes(cover.type) || cover.size > 8_000_000)
       return Response.json({ error: "invalid_cover" }, { status: 400 });
     coverKey = `imports/${item.batchId}/covers/${crypto.randomUUID()}-${cover.name.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-100)}`;
@@ -448,6 +449,16 @@ export async function PATCH(request: Request) {
       { status: 400 },
     );
 
+  let report:EditorialReport|undefined;
+  if(action==='check'||action==='publish'){
+    const pdf=!!item.fileName?.toLowerCase().endsWith('.pdf');
+    const object=item.storageKey?await env.BUCKET.get(item.storageKey,pdf?{range:{offset:0,length:5}}:undefined):null;
+    if(!object)return Response.json({error:'book_file_required'},{status:400});
+    if(!pdf&&object.size>32_000_000)return Response.json({error:'invalid_book_content'},{status:422});
+    report=checkEbook(new Uint8Array(await object.arrayBuffer()),{title,author,cover:!!coverKey||(cover instanceof File&&cover.size>0),pdf});
+    if(action==='check')return Response.json({report});
+    if(report.errors.length)return Response.json({error:'invalid_book_content',report},{status:422});
+  }
   let publishedBookId = item.publishedBookId;
   const mutations = [];
   if (action === "publish") {
@@ -508,6 +519,7 @@ export async function PATCH(request: Request) {
       rightsConfirmed,
       coverKey,
       correctionNote: correctionNote || null,
+      ...(report?{validationErrors:report.warnings}:{}),
       status,
       reviewedBy: user.email,
       reviewedAt: now,
@@ -516,7 +528,7 @@ export async function PATCH(request: Request) {
     })
     .where(and(eq(stagingBooks.id, id), ne(stagingBooks.status, "published"))));
   await db.batch(mutations as [typeof mutations[number], ...typeof mutations[number][]]);
-  return Response.json({ ok: true, status, publishedBookId });
+  return Response.json({ ok: true, status, publishedBookId, report });
 }
 
 export async function DELETE(request: Request) {

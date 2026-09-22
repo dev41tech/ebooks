@@ -2,12 +2,15 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {apiFetch,serviceUrl} from '../lib/client-api';
 import {chapterContains,type ReaderPage} from '../lib/reader-content';
+import ReaderFeedback from './reader-feedback';
+import {trackReading} from '../lib/telemetry';
 import {loadReaderPage} from '../lib/reader-client';
 
 type Location={position:number;progress:number;revision?:number};
 type Props={book:{id:string;title:string;format?:string};initialPage:ReaderPage|null;initial:Location;theme:string;font:number;preference:(t:string,f:number)=>void;onSave:(id:string,l:Location)=>Promise<Location>;onBack:()=>void};
 
 export default function Reader({book,initialPage,initial,theme,font,preference,onSave,onBack}:Props){
+  useEffect(()=>{if(!book.format?.toUpperCase().includes('PDF'))trackReading('reader_opened',book.id);},[book.id,book.format]);
   const pdf=book.format?.toUpperCase().includes('PDF');
   const [page,setPage]=useState(initialPage),pageRef=useRef(initialPage);
   const [current,setCurrent]=useState(initial),currentRef=useRef(initial),revision=useRef(initial.revision??0);
@@ -44,7 +47,7 @@ export default function Reader({book,initialPage,initial,theme,font,preference,o
       const next=await loadReaderPage(book.id,{position:location.position},controller.signal);
       if(ticket!==requestId.current||!mounted.current)return;
       show(next,location);
-    }catch(e){if(ticket===requestId.current&&mounted.current){setError((e as Error).message);retry.current=()=>{void apply(location);};}}
+    }catch(e){if(ticket===requestId.current&&mounted.current){trackReading('chapter_load_failed',book.id);setError((e as Error).message);retry.current=()=>{void apply(location);};}}
     finally{if(ticket===requestId.current&&mounted.current){switching.current=false;setLoading(false);}}
   },[book.id,pdf,show]);
 
@@ -64,7 +67,7 @@ export default function Reader({book,initialPage,initial,theme,font,preference,o
         const remote=(e as Error&{location?:Location}).location;
         if(mounted.current){
           if(remote){void apply(remote);setState('Retomamos a posição salva no outro dispositivo.');}
-          else setState('Sem sincronização. Tente salvar novamente antes de trocar de dispositivo.');
+          else {setState('Sem sincronização. Tente salvar novamente antes de trocar de dispositivo.');trackReading('sync_failed',book.id);}
         }
         return false;
       }
@@ -85,7 +88,7 @@ export default function Reader({book,initialPage,initial,theme,font,preference,o
       intent.current=false;currentRef.current=location;dirty.current=true;setCurrent(location);show(next,location);
       await persist(location);
     }catch(e){
-      if(ticket===requestId.current&&mounted.current){setError((e as Error).message);retry.current=()=>{void goChapter(index);};}
+      if(ticket===requestId.current&&mounted.current){trackReading('chapter_load_failed',book.id);setError((e as Error).message);retry.current=()=>{void goChapter(index);};}
     }finally{
       if(ticket===requestId.current&&mounted.current){switching.current=false;setLoading(false);setScrollTarget(t=>({position:currentRef.current.position,stamp:t.stamp+1}));}
     }
@@ -146,7 +149,8 @@ export default function Reader({book,initialPage,initial,theme,font,preference,o
 
   const navigation=page&&<nav className="reader-chapter-nav" aria-label="Navegação de capítulos"><button className="outline" disabled={loading||page.chapter.index===0} onClick={()=>goChapter(page.chapter.index-1)}>← Capítulo anterior</button><span>{page.chapter.navigationLabel}</span><button className="outline" disabled={loading||page.chapter.index===page.chapterCount-1} onClick={()=>goChapter(page.chapter.index+1)}>Próximo capítulo →</button></nav>;
   return <main className={`reader ${theme}`}><div className="reader-top" ref={toolbar}><button disabled={loading} onClick={async()=>{clearTimer();if(await persist(currentRef.current))onBack();}}>← Voltar</button><b>{book.title}</b><div className="reader-controls">{!pdf&&<><button type="button" title="Diminuir fonte" disabled={font<=16} aria-label="Diminuir fonte" onClick={()=>preference(theme,Math.max(16,font-2))}>A−</button><button type="button" title="Aumentar fonte" disabled={font>=32} aria-label="Aumentar fonte" onClick={()=>preference(theme,Math.min(32,font+2))}>A+</button><select aria-label="Tema do leitor" value={theme} onChange={e=>preference(e.target.value,font)}><option value="light">Claro</option><option value="sepia">Sépia</option><option value="dark">Escuro</option></select></>}</div></div>
-    {pdf?<section className="pdf-reader"><p>Para retomar um PDF, informe e salve a página exibida no visualizador.</p><label>Página <input type="number" min={1} max={100000} value={pdfPage} onChange={e=>{const position=Math.max(1,Math.min(100000,Number(e.target.value)||1));setPdfPage(position);currentRef.current={position,progress:currentRef.current.progress||1,revision:revision.current};dirty.current=true;}}/></label><button className="outline" onClick={()=>persist(currentRef.current)}>Salvar posição</button><iframe title={`Leitura de ${book.title}`} src={serviceUrl(`/api/catalog/file?id=${encodeURIComponent(book.id)}#page=${pdfPage}`)}/></section>:<>
+    <ReaderFeedback bookId={book.id} chapterLabel={pdf?`Página ${pdfPage}`:page?.chapter.navigationLabel} position={current.position}/>
+    {pdf?<section className="pdf-reader"><p>Para retomar um PDF, informe e salve a página exibida no visualizador.</p><label>Página <input type="number" min={1} max={100000} value={pdfPage} onChange={e=>{const position=Math.max(1,Math.min(100000,Number(e.target.value)||1));setPdfPage(position);currentRef.current={position,progress:currentRef.current.progress||1,revision:revision.current};dirty.current=true;}}/></label><button className="outline" onClick={()=>persist(currentRef.current)}>Salvar posição</button><iframe onLoad={()=>trackReading('reader_opened',book.id)} title={`Leitura de ${book.title}`} src={serviceUrl(`/api/catalog/file?id=${encodeURIComponent(book.id)}#page=${pdfPage}`)}/></section>:<>
       <div className="reader-chapter-tools">{navigation}{loading&&<p role="status">Carregando capítulo…</p>}{error&&<div role="alert"><p>{error}</p><button className="outline" onClick={()=>retry.current?.()}>Tentar novamente</button></div>}</div>
       {!loading&&!error&&page&&<article ref={article} style={{fontSize:font}}>{page.chapter.blocks.map(block=><div className="reader-block" key={block.position} id={`paragraph-${block.position}`} data-reader-position={block.position}>{(block.chapterLabel||block.heading)&&<div className="reader-chapter-heading">{block.chapterLabel&&<p className="reader-chapter-number">{block.chapterLabel}</p>}{block.heading&&<h2 className="reader-chapter-title">{block.heading}</h2>}</div>}{!block.hidden&&<p>{block.text}</p>}</div>)}{navigation}<div className="reader-end"><button className="outline" onClick={()=>persist(currentRef.current)}>Salvar posição</button>{page.chapter.index===page.chapterCount-1&&<button className="primary" onClick={async()=>{clearTimer();const end={position:page.totalParagraphs-1,progress:100,revision:revision.current};currentRef.current=end;dirty.current=true;setCurrent(end);await persist(end);}}>Concluir leitura</button>}</div></article>}
     </>}
