@@ -39,6 +39,7 @@ Defina pelo painel de secrets do Easypanel, nunca no repositório:
 | `SUPABASE_ANON_KEY` | Autenticação Supabase. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Acesso do servidor ao Storage. |
 | `SUPABASE_STORAGE_BUCKET` | Bucket privado; padrão `sambu`. |
+| `VINEXT_TRUSTED_HOSTS` | Hosts públicos aceitos do proxy, sem protocolo nem caminho. O Dockerfile já define `ebooks.41tech.cloud`. Em homologação com outro domínio, substitua pelo host exato. |
 | `ADMIN_EMAILS` | E-mails dos proprietários, separados por vírgula. |
 | `SAMBU_ADMIN_EMAILS` | Opcional; substitui `ADMIN_EMAILS` nos recursos do beta. Prefira manter somente `ADMIN_EMAILS` para também manter o Studio alinhado. |
 | `SAMBU_ADMIN_TESTER_EMAILS` | Opcional; operadores convidados de livros, sem acesso ao backup/master. |
@@ -46,6 +47,12 @@ Defina pelo painel de secrets do Easypanel, nunca no repositório:
 | `SAMBU_BETA_EMAILS` | Lista de leitores convidados quando o beta está fechado. |
 
 O proprietário precisa definir/desbloquear a senha master pelo painel. O cadastro e a confirmação de e-mail seguem a configuração do Supabase Auth. Mantenha HTTPS para os cookies seguros. Configure no Supabase o domínio da homologação e depois o definitivo.
+
+### Cadastro bloqueado por `invalid_origin`
+
+O Easypanel termina o HTTPS e encaminha HTTP ao container. O servidor Vinext precisa reconhecer os cabeçalhos do proxy para reconstruir o endereço público antes de comparar o `Origin`. A imagem já configura `VINEXT_TRUSTED_HOSTS=ebooks.41tech.cloud`; após atualizar a `main`, clique em **Implantar**. Se houver uma variável de mesmo nome no ambiente do serviço, ela deve conter esse host, pois o Easypanel pode substituir o padrão da imagem.
+
+Para corrigir uma imagem anterior sem mudar código, adicione essa mesma variável em **app → ebooks → Ambiente**, salve e reimplante. O proxy deve enviar `X-Forwarded-Proto: https` e `X-Forwarded-Host: ebooks.41tech.cloud`. Não use curingas nem libere todas as origens. As verificações de origem do cadastro/login, master, backup e importação continuam ativas; requisições de outros sites continuam bloqueadas. Se usar um comando de inicialização fora do Docker, configure também a variável nesse ambiente.
 
 ## Homologação antes do merge
 

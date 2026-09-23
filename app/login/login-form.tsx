@@ -9,6 +9,8 @@ const messages: Record<string, string> = {
   invalid_credentials_format:
     "Informe um e-mail válido e uma senha de pelo menos 8 caracteres.",
   signup_failed: "Não foi possível criar a conta.",
+  invalid_origin:
+    "O acesso está indisponível neste endereço. Avise a administração do Sambu.",
 };
 
 export default function LoginForm({ returnTo }: { returnTo: string }) {
@@ -26,29 +28,34 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
     setError(null);
     setNotice(null);
 
-    const response = await fetch("/api/auth", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: mode, email, password, displayName }),
-    });
-    const data = (await response.json().catch(() => ({}))) as {
-      error?: string;
-      confirmationRequired?: boolean;
-    };
-    setBusy(false);
+    try {
+      const response = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: mode, email, password, displayName }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        confirmationRequired?: boolean;
+      };
 
-    if (!response.ok) {
-      setError(messages[data.error || ""] || data.error || "Erro inesperado.");
-      return;
+      if (!response.ok) {
+        setError(messages[data.error || ""] || data.error || "Erro inesperado.");
+        return;
+      }
+      if (data.confirmationRequired) {
+        setNotice(
+          "Conta criada. Confirme o e-mail pelo link que enviamos e depois entre.",
+        );
+        setMode("login");
+        return;
+      }
+      window.location.href = returnTo;
+    } catch {
+      setError("Não foi possível conectar ao Sambu. Verifique sua conexão e tente novamente.");
+    } finally {
+      setBusy(false);
     }
-    if (data.confirmationRequired) {
-      setNotice(
-        "Conta criada. Confirme o e-mail pelo link que enviamos e depois entre.",
-      );
-      setMode("login");
-      return;
-    }
-    window.location.href = returnTo;
   }
 
   return (
@@ -100,8 +107,8 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
           />
         </label>
 
-        {error && <p className="login-error">{error}</p>}
-        {notice && <p className="login-notice">{notice}</p>}
+        {error && <p className="login-error" role="alert">{error}</p>}
+        {notice && <p className="login-notice" role="status">{notice}</p>}
 
         <button className="primary" type="submit" disabled={busy}>
           {busy ? "Aguarde…" : mode === "login" ? "Entrar" : "Criar conta"}
@@ -110,6 +117,7 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
         <button
           className="ghost"
           type="button"
+          disabled={busy}
           onClick={() => {
             setMode(mode === "login" ? "signup" : "login");
             setError(null);
