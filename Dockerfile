@@ -20,7 +20,8 @@ WORKDIR /app
 
 ENV NODE_ENV=production \
     PORT=3000 \
-    HOST=0.0.0.0
+    HOST=0.0.0.0 \
+    VINEXT_TRUSTED_HOSTS=ebooks.41tech.cloud
 
 RUN addgroup -g 1001 -S nodejs && adduser -u 1001 -S sambu -G nodejs
 

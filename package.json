@@ -17,7 +17,7 @@
     "build:vps": "BUILD_TARGET=node vinext build",
     "start:vps": "node dist/standalone/server.js",
     "typecheck": "tsc --noEmit",
-    "test:integration": "node --test tests/vps.integration.test.mjs tests/migration.test.mjs",
+    "test:integration": "node --test tests/vps.integration.test.mjs tests/migration.test.mjs tests/auth-proxy.test.mjs",
     "test:client": "node --test tests/client-api.test.mjs tests/reader-blocks.test.mjs tests/catalog-transfer.test.mjs",
     "db:migrate:vps": "node scripts/migrate-vps.mjs"
   },
