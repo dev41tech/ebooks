@@ -16,6 +16,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const access = await requireAccess("admin");
   if (access.error) return access.error;
+  if (access.temporaryAdmin) return Response.json({error:"temporary_readonly_catalog"},{status:403});
   const user = access.user!;
   const body = (await request.json()) as Record<string, unknown>;
   const title = String(body.title || "")
@@ -73,6 +74,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const access = await requireAccess("admin");
   if (access.error) return access.error;
+  if (access.temporaryAdmin) return Response.json({error:"temporary_readonly_catalog"},{status:403});
   const user = access.user!;
   const body = (await request.json()) as Record<string, unknown>;
   const id = String(body.id || "");
@@ -141,6 +143,7 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   const access = await requireAccess("admin");
   if (access.error) return access.error;
+  if (access.temporaryAdmin) return Response.json({error:"temporary_readonly_catalog"},{status:403});
   const body = await request.json().catch(() => null) as {id?:unknown;confirmTitle?:unknown}|null;
   if (!body || typeof body.id !== "string" || typeof body.confirmTitle !== "string")
     return Response.json({error:"invalid_payload"},{status:400});

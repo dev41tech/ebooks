@@ -34,6 +34,8 @@ Defina pelo painel de secrets do Easypanel, nunca no repositório:
 
 | Variável | Uso |
 | --- | --- |
+| `SAMBU_TEMPORARY_PUBLIC_ADMIN` | `true` autoriza o modo temporário de leitura e importação sem login, somente com a data abaixo ainda válida. Desativado por padrão. |
+| `SAMBU_TEMPORARY_PUBLIC_ADMIN_UNTIL` | Expiração obrigatória em UTC, no formato `AAAA-MM-DDTHH:MM:SSZ`. Ausente, inválida ou vencida mantém o modo fechado. |
 | `DATABASE_URL` | PostgreSQL; conexão Supabase adequada ao servidor. Driver usa `prepare:false`. |
 | `SUPABASE_URL` | URL HTTPS do projeto. |
 | `SUPABASE_ANON_KEY` | Autenticação Supabase. |
@@ -48,6 +50,19 @@ Defina pelo painel de secrets do Easypanel, nunca no repositório:
 | `SAMBU_BETA_EMAILS` | Lista de leitores convidados quando o beta está fechado. |
 
 O proprietário precisa definir/desbloquear a senha master pelo painel. O cadastro e a confirmação de e-mail seguem a configuração do Supabase Auth. Mantenha HTTPS para os cookies seguros. Configure no Supabase o domínio da homologação e depois o definitivo.
+
+### Modo temporário sem login
+
+A imagem permanece protegida por padrão. Para abrir o teste, defina no **Ambiente do serviço ebooks** `SAMBU_TEMPORARY_PUBLIC_ADMIN=true` e `SAMBU_TEMPORARY_PUBLIC_ADMIN_UNTIL` com uma data futura em UTC (formato `AAAA-MM-DDTHH:MM:SSZ`). Escolha um período curto, por exemplo 24 horas. Salve e clique em **Implantar**. Não é necessário usar o console. Acesse `https://ebooks.41tech.cloud/?view=admin`.
+
+- Até a expiração, entrada, leitura, importação individual/em lote, revisão de novas importações e publicação ficam disponíveis a qualquer visitante.
+- **Importar acervo do backup** aceita o ZIP já baixado. Não sobrescreve livros existentes. Validações de origem, propriedade do upload, arquivos e checksum continuam ativas.
+- Livros já publicados ficam somente para consulta no painel aberto. Edição, substituição de arquivos e exclusão do catálogo exigem o modo autenticado.
+- O modo usa uma identidade de teste separada das contas reais, sem chamar Supabase Auth. Biblioteca, favoritos, buscas, avaliações e progresso de teste são compartilhados entre visitantes, com aviso na interface. Não é um teste de sincronização de contas individuais.
+- Cadastro pessoal, credenciais master, exportação de dados pessoais e relatos privados permanecem protegidos. O painel aberto se concentra na importação dos livros; não concede acesso ao Studio/geração por IA.
+- Quando o prazo vence, as próximas requisições voltam a exigir autenticação, sem reiniciar o servidor. Para encerrar antes, defina `SAMBU_TEMPORARY_PUBLIC_ADMIN=false` e reimplante. Livros publicados no teste continuam no acervo; contas, permissões e senha master são preservadas. O diagnóstico do Supabase ainda será necessário para resolver a causa do erro de autenticação antes de voltar a usar contas reais.
+
+Este modo publica no acervo real. Use-o somente durante o período de teste autorizado.
 
 ### Cadastro bloqueado por `invalid_origin`
 

@@ -11,7 +11,7 @@ const output=path.join(root,'tests','.generated-auth');
 const publicHost='ebooks.41tech.cloud';
 const publicOrigin=`https://${publicHost}`;
 const originalEnv={...process.env};
-let POST, nodeToWebRequest, checkAuth, authErrorMessage;
+let POST, nodeToWebRequest, checkAuth, authErrorMessage, authIdentity;
 
 before(async()=>{
   // Use the actual production server and the exact configuration shipped in Docker.
@@ -23,17 +23,20 @@ before(async()=>{
   process.env.SUPABASE_URL='https://auth.example.test';
   process.env.SUPABASE_ANON_KEY='isolated-test-key';
   delete process.env.SUPABASE_PUBLISHABLE_KEY;
+  delete process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN;
+  delete process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN_UNTIL;
   ({nodeToWebRequest}=await import('../node_modules/vinext/dist/server/prod-server.js'));
   await mkdir(output,{recursive:true});
   await build({
-    entryPoints:[path.join(root,'app/api/auth/route.ts')],
-    outfile:path.join(output,'auth.mjs'),bundle:true,platform:'node',format:'esm',packages:'external',
+    entryPoints:{auth:path.join(root,'app/api/auth/route.ts'),identity:path.join(root,'app/auth.ts')},
+    outdir:output,outExtension:{'.js':'.mjs'},bundle:true,platform:'node',format:'esm',packages:'external',
     plugins:[{name:'isolated-next-request',setup(b){
       b.onResolve({filter:/^next\/(headers|navigation)$/},args=>({path:args.path,namespace:'test-next'}));
       b.onLoad({filter:/.*/,namespace:'test-next'},()=>({contents:'export async function cookies(){return new Map(globalThis.__authTestCookies || []);} export function redirect(){throw new Error("unexpected_redirect");}'}));
     }}],
   });
   ({POST}=await import(pathToFileURL(path.join(output,'auth.mjs'))));
+  authIdentity=await import(pathToFileURL(path.join(output,'identity.mjs')));
   for(const [file,source] of [['check-auth','scripts/check-auth.ts'],['auth-messages','app/lib/auth-messages.ts']]){
     await build({entryPoints:[path.join(root,source)],outfile:path.join(output,`${file}.mjs`),bundle:true,platform:'node',format:'esm',packages:'external'});
   }
@@ -41,7 +44,7 @@ before(async()=>{
   ({authErrorMessage}=await import(pathToFileURL(path.join(output,'auth-messages.mjs'))));
 });
 after(async()=>{
-  for(const key of ['VINEXT_TRUSTED_HOSTS','VINEXT_TRUST_PROXY','SUPABASE_URL','SUPABASE_ANON_KEY','SUPABASE_PUBLISHABLE_KEY']){
+  for(const key of ['VINEXT_TRUSTED_HOSTS','VINEXT_TRUST_PROXY','SUPABASE_URL','SUPABASE_ANON_KEY','SUPABASE_PUBLISHABLE_KEY','SAMBU_TEMPORARY_PUBLIC_ADMIN','SAMBU_TEMPORARY_PUBLIC_ADMIN_UNTIL']){
     if(originalEnv[key]===undefined)delete process.env[key];else process.env[key]=originalEnv[key];
   }
   await rm(output,{recursive:true,force:true});
@@ -247,4 +250,40 @@ test('invalid request bodies return 400; blank server errors still have useful c
   assert.equal(calls.length,0);
   assert.match(authErrorMessage(undefined,500),/indisponível/);
   assert.doesNotMatch(authErrorMessage('secret SQL details',500,'not-a-reference'),/secret SQL|not-a-reference/);
+});
+
+test('temporary access works without Supabase or cookies and does not unlock private or AI administration',async(t)=>{
+  const prior={url:process.env.SUPABASE_URL,key:process.env.SUPABASE_ANON_KEY};
+  process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN='true';
+  process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN_UNTIL=new Date(Date.now()+3600000).toISOString().replace(/\.\d{3}Z$/,'Z');
+  delete process.env.SUPABASE_URL;delete process.env.SUPABASE_ANON_KEY;
+  // A leftover authenticated cookie must not require the broken Auth service.
+  globalThis.__authTestCookies=[['sb-access-token',{value:'old-session'}]];
+  t.after(()=>{delete process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN;delete process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN_UNTIL;delete globalThis.__authTestCookies;process.env.SUPABASE_URL=prior.url;process.env.SUPABASE_ANON_KEY=prior.key;});
+  const calls=isolatedAuth(t,{});
+  const user=await authIdentity.getUser();
+  assert.equal(user.temporary,true);assert.equal(user.email,'public-test@sambu.invalid');
+  assert.equal((await authIdentity.requireAdmin()).error.status,403);
+  assert.equal((await authIdentity.requireAuthor()).error.status,403);
+  assert.equal((await POST(proxied(account))).status,409);
+  assert.equal(calls.length,0);
+});
+
+test('turning temporary mode off restores login; only the exact server setting enables it',async(t)=>{
+  const calls=isolatedAuth(t,{});
+  t.after(()=>{delete process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN;delete process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN_UNTIL;});
+  const future=new Date(Date.now()+3600000).toISOString().replace(/\.\d{3}Z$/,'Z');
+  process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN_UNTIL=future;
+  for(const value of ['false','1','yes','true ','TRUE','']){
+    process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN=value;
+    assert.equal(await authIdentity.getUser(),null);
+  }
+  process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN='true';assert.equal((await authIdentity.getUser()).temporary,true);
+  process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN='false';assert.equal(await authIdentity.getUser(),null);
+  process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN='true';
+  for(const value of ['', 'invalid', new Date(Date.now()-1000).toISOString().replace(/\.\d{3}Z$/,'Z')]){
+    process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN_UNTIL=value;
+    assert.equal(await authIdentity.getUser(),null);
+  }
+  assert.equal(calls.length,0);
 });

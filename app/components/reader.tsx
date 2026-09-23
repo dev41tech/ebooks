@@ -7,9 +7,9 @@ import {trackReading} from '../lib/telemetry';
 import {loadReaderPage} from '../lib/reader-client';
 
 type Location={position:number;progress:number;revision?:number};
-type Props={book:{id:string;title:string;format?:string};initialPage:ReaderPage|null;initial:Location;theme:string;font:number;preference:(t:string,f:number)=>void;onSave:(id:string,l:Location)=>Promise<Location>;onBack:()=>void};
+type Props={book:{id:string;title:string;format?:string};initialPage:ReaderPage|null;initial:Location;theme:string;font:number;preference:(t:string,f:number)=>void;onSave:(id:string,l:Location)=>Promise<Location>;onBack:()=>void;temporaryAccess?:boolean};
 
-export default function Reader({book,initialPage,initial,theme,font,preference,onSave,onBack}:Props){
+export default function Reader({book,initialPage,initial,theme,font,preference,onSave,onBack,temporaryAccess=false}:Props){
   useEffect(()=>{if(!book.format?.toUpperCase().includes('PDF'))trackReading('reader_opened',book.id);},[book.id,book.format]);
   const pdf=book.format?.toUpperCase().includes('PDF');
   const [page,setPage]=useState(initialPage),pageRef=useRef(initialPage);
@@ -62,7 +62,7 @@ export default function Reader({book,initialPage,initial,theme,font,preference,o
         if(stamp!==generation.current)return false;
         revision.current=saved.revision??0;
         if(currentRef.current.position===location.position&&currentRef.current.progress===location.progress){dirty.current=false;currentRef.current=saved;if(mounted.current)setCurrent(saved);}
-        if(mounted.current)setState('Posição sincronizada com sua conta');return true;
+        if(mounted.current)setState(temporaryAccess?'Posição salva no teste compartilhado':'Posição sincronizada com sua conta');return true;
       }catch(e){
         const remote=(e as Error&{location?:Location}).location;
         if(mounted.current){
@@ -72,7 +72,7 @@ export default function Reader({book,initialPage,initial,theme,font,preference,o
         return false;
       }
     });queue.current=job;return job;
-  },[apply,book.id,onSave]);
+  },[apply,book.id,onSave,temporaryAccess]);
 
   const goChapter=useCallback(async(index:number)=>{
     if(switching.current||!pageRef.current)return;

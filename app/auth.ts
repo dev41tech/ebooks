@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { authConfig } from "./lib/auth-service";
+import { temporaryAdminEnabled, TEMPORARY_USER } from "./lib/temporary-access";
 export { authConfig } from "./lib/auth-service";
 
 export const ACCESS_COOKIE = "sb-access-token";
@@ -10,6 +11,7 @@ export type SessionUser = {
   id: string;
   email: string;
   displayName: string;
+  temporary?: boolean;
 };
 
 /**
@@ -19,6 +21,7 @@ export type SessionUser = {
  * assimetricas dos projetos novos).
  */
 export async function getUser(): Promise<SessionUser | null> {
+  if (temporaryAdminEnabled()) return TEMPORARY_USER;
   const token = (await cookies()).get(ACCESS_COOKIE)?.value;
   if (!token) return null;
 
@@ -76,7 +79,7 @@ export async function requireAdmin(): Promise<
       error: Response.json({ error: "sign_in_required" }, { status: 401 }),
     };
   }
-  if (!isAdmin(user.email)) {
+  if (user.temporary || !isAdmin(user.email)) {
     return {
       user: null,
       error: Response.json({ error: "forbidden" }, { status: 403 }),
@@ -127,7 +130,7 @@ export async function requireAuthor(): Promise<
       error: Response.json({ error: "sign_in_required" }, { status: 401 }),
     };
   }
-  if (!(await isAuthor(user.email))) {
+  if (user.temporary || !(await isAuthor(user.email))) {
     return {
       user: null,
       error: Response.json({ error: "forbidden" }, { status: 403 }),

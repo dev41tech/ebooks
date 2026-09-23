@@ -1,11 +1,11 @@
 import {createHash} from 'node:crypto';
 export const env={};
-export const identity={email:null,cookie:''};
+export const identity={email:null,cookie:'',temporary:false};
 let runtime;
 export function initialize(value){runtime=value;env.DB=value.database;env.BUCKET=makeBucket();}
 export function getDatabase(){return runtime.database;}
 export async function getDb(){return runtime.orm;}
-export async function getUser(){return identity.email?{id:identity.email,email:identity.email,displayName:identity.email}:null;}
+export async function getUser(){return identity.email?{id:identity.email,email:identity.email,displayName:identity.email,temporary:identity.temporary}:null;}
 export async function headers(){return new Headers(identity.cookie?{cookie:identity.cookie}:{});}
 export function redirect(){throw new Error('unexpected_redirect');}
 function makeBucket(){
