@@ -1,3 +1,5 @@
+import {checkStorage} from '../../../../db/storage-service';
+import {withImportErrors} from '../../../lib/import-errors';
 import {requireAccess} from '../../../lib/access';
 import {bucket} from '../../../../db/storage';
 const CHUNK_SIZE=250_000,MAX_FILE_SIZE=250_000_000,MAX_PARTS=1000;
@@ -11,7 +13,7 @@ async function boundedBody(request:Request){
  if(!size)return null;
  return new Blob(parts as BlobPart[]);
 }
-export async function POST(request:Request){
+async function handlePOST(request:Request){
  const access=await requireAccess('admin');if(access.error)return access.error;const email=access.user!.email;
  const b=await request.json().catch(()=>({}));const id=String(b.uploadId||'');
  if(b.action==='init'){
@@ -51,7 +53,7 @@ export async function POST(request:Request){
  for(let i=0;i<total;i++)await bucket.delete(root+'/parts/'+i).catch(()=>{});
  return Response.json({ok:true,storageKey:key,fileName:meta.fileName,contentType:meta.contentType,fileSize:meta.size});
 }
-export async function PUT(request:Request){
+async function handlePUT(request:Request){
  const access=await requireAccess('admin');if(access.error)return access.error;
  const u=new URL(request.url),id=u.searchParams.get('uploadId')||'',part=Number(u.searchParams.get('part'));
  if(!validId(id)||!Number.isInteger(part)||part<0||part>=MAX_PARTS)return Response.json({error:'invalid_part'},{status:400});
@@ -62,3 +64,12 @@ export async function PUT(request:Request){
  if(!body||part>=Math.ceil(meta.size/CHUNK_SIZE)||body.size!==Math.min(CHUNK_SIZE,meta.size-part*CHUNK_SIZE))return Response.json({error:'invalid_chunk_size'},{status:400});
  await bucket.put(root+'/parts/'+part,body);return Response.json({ok:true,part,size:body.size});
 }
+
+export async function POST(request:Request){return withImportErrors('uploads_post',()=>handlePOST(request));}
+
+export async function PUT(request:Request){return withImportErrors('uploads_put',()=>handlePUT(request));}
+
+export async function GET(){return withImportErrors('storage_check',async()=>{
+ const access=await requireAccess('admin');if(access.error)return access.error;
+ return Response.json(await checkStorage(),{headers:{'Cache-Control':'private, no-store'}});
+});}

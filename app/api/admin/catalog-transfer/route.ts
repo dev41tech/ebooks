@@ -1,3 +1,4 @@
+import {withImportErrors} from '../../../lib/import-errors';
 import {eq, or} from 'drizzle-orm';
 import {getDb} from '../../../../db';
 import {books} from '../../../../db/schema';
@@ -14,12 +15,12 @@ async function ownerAccess() {
  if(!access.ownerAdmin || !await masterUnlocked(access.user!.email)) return {...access,error:Response.json({error:'owner_master_required'},{status:403})};
  return access;
 }
-export async function GET() {
+async function handleGET() {
  const access=await ownerAccess(); if(access.error) return access.error;
  const db=await getDb();
  return Response.json({books:await db.select({id:books.id,slug:books.slug,status:books.status}).from(books)},{headers:{'Cache-Control':'private, no-store'}});
 }
-export async function POST(request:Request) {
+async function handlePOST(request:Request) {
  const access=await ownerAccess(); if(access.error) return access.error;
  if(request.headers.get('origin')!==new URL(request.url).origin) return Response.json({error:'invalid_origin'},{status:403});
  if(!request.body) return Response.json({error:'invalid_payload'},{status:400});
@@ -59,3 +60,7 @@ export async function POST(request:Request) {
  }
  return Response.json({ok:true,id:book.id,alreadyExists:!inserted.length},{status:inserted.length?201:200});
 }
+
+export async function GET(){return withImportErrors('catalog-transfer_get',()=>handleGET());}
+
+export async function POST(request:Request){return withImportErrors('catalog-transfer_post',()=>handlePOST(request));}

@@ -41,6 +41,7 @@ Defina pelo painel de secrets do Easypanel, nunca no repositório:
 | `SUPABASE_ANON_KEY` | Autenticação Supabase. |
 | `SUPABASE_PUBLISHABLE_KEY` | Alternativa à chave `anon` para autenticação; tem prioridade quando preenchida. Use uma chave pública do mesmo projeto de `SUPABASE_URL`. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Acesso do servidor ao Storage. |
+| `SUPABASE_SECRET_KEY` | Alternativa à service role para Storage; tem prioridade. Chave secreta `sb_secret_...` do mesmo projeto. Nunca colocar no cliente ou GitHub. |
 | `SUPABASE_STORAGE_BUCKET` | Bucket privado; padrão `sambu`. |
 | `VINEXT_TRUSTED_HOSTS` | Hosts públicos aceitos do proxy, sem protocolo nem caminho. O Dockerfile já define `ebooks.41tech.cloud`. Em homologação com outro domínio, substitua pelo host exato. |
 | `ADMIN_EMAILS` | E-mails dos proprietários, separados por vírgula. |
@@ -128,3 +129,18 @@ Para reverter o aplicativo, reimplante a imagem anterior. As novas colunas/tabel
 `npm run build:vps`: gera `dist/standalone`. Smoke local confirmou `/login` (200), `/api/session` (200), `/api/progress` sem sessão (401) e logo (200). Docker não está disponível no ambiente de desenvolvimento; o workflow `.github/workflows/vps.yml` executa o build da imagem no GitHub.
 
 Ainda exigem homologação: Docker no CI, Supabase Auth/Storage reais, dados reais, proxy/HTTPS do Easypanel e teste visual no celular físico. Nenhuma migração foi executada na VPS durante a preparação deste PR.
+
+
+### Diagnóstico de importação sem usar o console
+
+Na administração, **Importar acervo do backup** verifica a conexão com o Storage antes de enviar o primeiro livro. A verificação apenas consulta o bucket; não o cria nem muda permissões. Uploads individuais e em lote também mostram erros específicos de armazenamento.
+
+- URL/chave ausente ou inválida: ajustar as variáveis indicadas em **Easypanel → app → ebooks → Ambiente**, salvar e implantar.
+- Bucket ausente: conferir `SUPABASE_STORAGE_BUCKET` (padrão `sambu`) e criar o bucket privado no mesmo projeto Supabase, se necessário.
+- Tipo ou tamanho recusado: ajustar os limites do bucket. A transferência usa JSON, partes `application/octet-stream` e EPUB; os outros fluxos também usam PDF e imagens.
+- Falha de conexão: conferir URL, estado do projeto, DNS/rede e TLS entre a VPS e o Supabase.
+- Falha inesperada: procurar nos logs do serviço `sambu_import_error` e a referência mostrada na tela. Os logs contêm etapa, código e motivo controlado, sem chaves, e-mails ou respostas brutas.
+
+O adaptador aceita a service role legada e a nova secret key (inclusive na variável legada), remove espaços externos da configuração e envia chaves `sb_secret_...` somente em `apikey`. Não trata todo HTTP 400 como arquivo ausente: verifica a resposta estruturada do provedor. A leitura por intervalo e a validação de ETag continuam obrigatórias.
+
+Essa verificação não comprova permissão de escrita, cota ou importação completa. A validação final exige enviar um livro, publicar e abrir a leitura no ambiente implantado.

@@ -1,4 +1,5 @@
 "use client";
+import {importErrorMessage} from './lib/import-messages';
 import BetaDashboard from './components/beta-dashboard';
 import CatalogTransfer from './components/catalog-transfer';
 import EditorialCheck from './components/editorial-check';
@@ -15,7 +16,7 @@ export type User = { name: string; email: string; admin: boolean; participant: b
 type View = "home" | "catalog" | "library" | "detail" | "reader" | "profile" | "admin" | "guide";
 type Book = { id: string; title: string; author: string; genre: string; categoryMain?:string|null; categoriesSecondary?:string[]|null; description: string; format?: string; status: string; publishedAt?: string; coverKey?: string; language?: string; };
 type Location = { position: number; progress: number; revision?:number };
-type ApiPayload = { recommendations?:{bookId:string;reason:string}[]; configured?:boolean; unlocked?:boolean; error?: string; message?: string; books?: Book[]; profile?: { displayName?: string; tasteProfile?:ReaderProfile }; favorites?: string[]; locations?: Record<string,Location>; batches?: ImportBatch[]; items?: StagedBook[]; uploadId?: string; chunkSize?: number; batch: { validItems:number; errorItems:number }; publishedBookId?:string; storageKey?:string; fileName?:string; contentType?:string; fileSize?:number };
+type ApiPayload = { requestId?:string; recommendations?:{bookId:string;reason:string}[]; configured?:boolean; unlocked?:boolean; error?: string; message?: string; books?: Book[]; profile?: { displayName?: string; tasteProfile?:ReaderProfile }; favorites?: string[]; locations?: Record<string,Location>; batches?: ImportBatch[]; items?: StagedBook[]; uploadId?: string; chunkSize?: number; batch: { validItems:number; errorItems:number }; publishedBookId?:string; storageKey?:string; fileName?:string; contentType?:string; fileSize?:number };
 const searchText=(value:string)=>value.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLocaleLowerCase("pt-BR").trim().replace(/\s+/g," ");
 const NAV: { id: View; label: string }[] = [{id:"home",label:"Início"},{id:"catalog",label:"Explorar"},{id:"library",label:"Minha biblioteca"}];
 const messages: Record<string,string> = { title_confirmation_required:"Digite exatamente o título atual do ebook para confirmar.", master_required:"Digite a senha master para abrir a administração.", master_password_length:"Use uma senha entre 12 e 128 caracteres.", master_invalid_password:"Senha master incorreta.", master_rate_limited:"Muitas tentativas. Aguarde 15 minutos antes de tentar novamente.", master_already_configured:"A senha master já foi criada. Recarregue a página e entre com ela.", master_setup_required:"Crie a senha master no primeiro acesso.", sign_in_required:"Entre na sua conta para continuar.", invitation_required:"Esta conta ainda não está na lista de participantes do beta.", admin_required:"Esta área é exclusiva da administração.", invalid_book_content:"O arquivo não pôde ser lido. Confira o EPUB (até 32 MB) ou PDF antes de publicar.", review_required:"Publique esta obra pela revisão da importação.", published_import_protected:"Esta importação possui uma obra vinculada. Seus arquivos estão protegidos.", book_file_required:"Selecione um arquivo válido para o livro.", review_incomplete:"Confira os dados e confirme os direitos para publicar." };
@@ -307,7 +308,7 @@ function ImportCenter({ notify, owner, onBusy, initialMode="individual" }: { onB
     else {
       const initResponse = await apiFetch("/api/admin/uploads?v=3", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"init",fileName:file.name,contentType:file.type,size:file.size})});
       initialized = await initResponse.json().catch(()=>({})) as ApiPayload;
-      if (!initResponse.ok) throw new Error(initialized.error || `init_${initResponse.status}`);
+      if (!initResponse.ok) throw new Error(importErrorMessage(initialized, initialized.error || `Falha ao iniciar o envio (HTTP ${initResponse.status}).`));
     }
 
     function base64(buffer: ArrayBuffer) {
@@ -342,7 +343,7 @@ function ImportCenter({ notify, owner, onBusy, initialMode="individual" }: { onB
       if (!response) throw new Error("network_error");
       const detail = await response.json().catch(() => ({})) as ApiPayload;
       if (!response.ok)
-        throw new Error(detail.error || `part_${part + 1}_${response.status}`);
+        throw new Error(importErrorMessage(detail, detail.error || `Falha ao enviar a parte ${part+1} (HTTP ${response.status}).`));
       try { localStorage.setItem(resumeKey,JSON.stringify({uploadId:initialized.uploadId,chunkSize,nextPart:part+1})); } catch {}
     }
 
@@ -361,7 +362,7 @@ function ImportCenter({ notify, owner, onBusy, initialMode="individual" }: { onB
     });
     const completed = await completeResponse.json().catch(() => ({})) as ApiPayload;
     if (!completeResponse.ok)
-      throw new Error(completed.error || `complete_${completeResponse.status}`);
+      throw new Error(importErrorMessage(completed, completed.error || `Falha ao finalizar o envio (HTTP ${completeResponse.status}).`));
     try { localStorage.removeItem(resumeKey); } catch {}
     return completed;
   }
