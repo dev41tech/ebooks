@@ -1,15 +1,11 @@
-import {database} from './sql';
 import {storageConfig,storageFetch,storageResponseError} from './storage-service';
+import {diskBucket} from './storage-disk';
+import {assertStorageKey,readCustomMetadata,writeCustomMetadata,deleteCustomMetadata} from './storage-meta';
 type Metadata={contentType?:string};
 type GetOptions={range?:{offset:number;length:number};onlyIf?:{etagMatches:string}};
 type PutOptions={size?:number;httpMetadata?:Metadata;customMetadata?:Record<string,string>};
 function objectPath(key:string){
- if(!key||key.startsWith('/')||key.includes('\\')||key.includes('\0')||key.split('/').some(x=>x==='.'||x==='..'))throw new Error('invalid_storage_key');
- return 'object/'+encodeURIComponent(storageConfig().bucket)+'/'+key.split('/').map(encodeURIComponent).join('/');
-}
-async function metadata(key:string){
- const row=await database.prepare('SELECT metadata FROM storage_metadata WHERE key=?').bind(key).first<{metadata:Record<string,string>}>();
- return row?.metadata||{};
+ return 'object/'+encodeURIComponent(storageConfig().bucket)+'/'+assertStorageKey(key).split('/').map(encodeURIComponent).join('/');
 }
 function info(response:Response,key:string,customMetadata:Record<string,string>){
  const etag=response.headers.get('etag');
@@ -20,7 +16,7 @@ function info(response:Response,key:string,customMetadata:Record<string,string>)
 async function storageRequest(key:string,method:string,headers:Record<string,string>={},body?:BodyInit){
  return storageFetch(objectPath(key),method,headers,body);
 }
-export const bucket={
+const supabaseBucket={
  async head(key:string){
   const response=await storageRequest(key,'HEAD');
   // A legacy HEAD 400 has no error body. Probe one byte to distinguish missing from denied.
@@ -30,7 +26,7 @@ export const bucket={
    await probe.body?.cancel();
   }
   if(!response.ok){const error=await storageResponseError(response);if(error.code==='storage_object_missing')return null;throw error;}
-  return info(response,key,await metadata(key));
+  return info(response,key,await readCustomMetadata(key));
  },
  async get(key:string,options?:GetOptions){
   const headers:Record<string,string>={};
@@ -51,14 +47,28 @@ export const bucket={
   if(options?.size!==undefined){if(!Number.isSafeInteger(options.size)||options.size<0)throw new Error('invalid_upload_size');headers['content-length']=String(options.size);}
   const response=await storageRequest(key,'POST',headers,body as BodyInit);
   if(!response.ok)throw await storageResponseError(response);
-  await database.prepare('INSERT INTO storage_metadata(key,metadata,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET metadata=excluded.metadata,updated_at=excluded.updated_at').bind(key,JSON.stringify(options?.customMetadata||{}),new Date().toISOString()).run();
+  await writeCustomMetadata(key,options?.customMetadata||{});
  },
  async delete(key:string){
   const response=await storageRequest(key,'DELETE');
   if(!response.ok){const error=await storageResponseError(response);if(error.code!=='storage_object_missing')throw error;}
-  await database.prepare('DELETE FROM storage_metadata WHERE key=?').bind(key).run();
+  await deleteCustomMetadata(key);
  }
 };
+/**
+ * Driver de armazenamento. `disk` guarda os arquivos num volume da VPS;
+ * `supabase` mantem o transporte REST original.
+ *
+ * A escolha e explicita e nao adivinhada: com o projeto Supabase fora do ar, um
+ * default "tenta um, cai no outro" esconderia configuracao errada em vez de
+ * falhar -- foi silencio parecido, de uma variavel vazia, que ja deixou o app
+ * irmao preso num modelo antigo sem ninguem perceber.
+ *
+ * O default segue `supabase`, para que um deploy sem a variavel nova se comporte
+ * exatamente como antes.
+ */
+export const bucket=(process.env.STORAGE_DRIVER?.trim()||'supabase')==='disk'?diskBucket:supabaseBucket;
+
 // Existing studio/import scripts continue using the same storage entry points.
 export async function getObject(key:string){const obj=await bucket.get(key);return obj?{...obj,contentType:obj.httpMetadata.contentType}:null;}
 export async function putObject(key:string,body:Blob,contentType:string){return bucket.put(key,body,{httpMetadata:{contentType}});}
