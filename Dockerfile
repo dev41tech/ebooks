@@ -13,6 +13,7 @@ COPY . .
 ENV BUILD_TARGET=node
 RUN npx vinext build
 RUN npx esbuild scripts/migrate-vps.mjs --bundle --platform=node --format=esm --outfile=migrate-vps.mjs
+RUN npx esbuild scripts/check-auth.ts --bundle --platform=node --format=esm --outfile=check-auth.mjs
 
 # ---------- runtime ----------
 FROM node:22-alpine AS runner
@@ -29,6 +30,7 @@ RUN addgroup -g 1001 -S nodejs && adduser -u 1001 -S sambu -G nodejs
 COPY --from=build --chown=sambu:nodejs /app/dist/standalone ./
 
 COPY --from=build --chown=sambu:nodejs /app/migrate-vps.mjs ./scripts/migrate-vps.mjs
+COPY --from=build --chown=sambu:nodejs /app/check-auth.mjs ./scripts/check-auth.mjs
 COPY --from=build --chown=sambu:nodejs /app/scripts/start-vps.sh ./scripts/start-vps.sh
 COPY --from=build --chown=sambu:nodejs /app/drizzle ./drizzle
 

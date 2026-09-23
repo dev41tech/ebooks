@@ -1,120 +1,61 @@
 import { cookies } from "next/headers";
-import {
-  REFRESH_COOKIE,
-  authConfig,
-  clearedCookies,
-  sessionCookies,
-} from "../../auth";
+import { REFRESH_COOKIE, clearedCookies, sessionCookies } from "../../auth";
+import { AuthServiceError, hasAuthSession, supabaseAuth } from "../../lib/auth-service";
 
-type TokenResponse = {
-  access_token?: string;
-  refresh_token?: string;
-  expires_in?: number;
-  error_description?: string;
-  msg?: string;
-};
-
-function withCookies(body: unknown, status: number, setCookies: string[]) {
-  const headers = new Headers({ "content-type": "application/json" });
+function json(body: unknown, status = 200, setCookies: string[] = []) {
+  const headers = new Headers({ "content-type": "application/json", "cache-control": "no-store" });
   for (const cookie of setCookies) headers.append("set-cookie", cookie);
   return new Response(JSON.stringify(body), { status, headers });
 }
 
-async function supabaseAuth(path: string, payload: unknown) {
-  const { url, anonKey } = authConfig();
-  const response = await fetch(`${url}/auth/v1/${path}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      apikey: anonKey,
-      authorization: `Bearer ${anonKey}`,
-    },
-    body: JSON.stringify(payload),
-    cache: "no-store",
-    signal: AbortSignal.timeout(15000),
-  });
-  return { response, data: (await response.json()) as TokenResponse };
-}
-
-/** POST /api/auth  { action: "login" | "signup" | "refresh" | "logout" } */
+/** POST /api/auth { action: "login" | "signup" | "refresh" | "logout" } */
 export async function POST(request: Request) {
-  const origin=request.headers.get('origin');
-  if(origin && origin!==new URL(request.url).origin)return Response.json({error:'invalid_origin'},{status:403});
-  const body = (await request.json().catch(() => ({}))) as Record<
-    string,
-    unknown
-  >;
-  const action = String(body.action || "login");
-
-  if (action === "logout") {
-    return withCookies({ ok: true }, 200, clearedCookies());
+  const origin = request.headers.get("origin");
+  if (origin && origin !== new URL(request.url).origin) return json({ error: "invalid_origin" }, 403);
+  const body: unknown = await request.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "invalid_payload" }, 400);
+  const fields = body as Record<string, unknown>;
+  const action = fields.action ?? "login";
+  if (typeof action !== "string" || !["login", "signup", "refresh", "logout"].includes(action)) {
+    return json({ error: "invalid_payload" }, 400);
   }
-
-  if (action === "refresh") {
-    const refreshToken = (await cookies()).get(REFRESH_COOKIE)?.value;
-    if (!refreshToken) {
-      return withCookies(
-        { error: "no_session" },
-        401,
-        clearedCookies(),
-      );
+  try {
+    if (action === "logout") return json({ ok: true }, 200, clearedCookies());
+    if (action === "refresh") {
+      const refreshToken = (await cookies()).get(REFRESH_COOKIE)?.value;
+      if (!refreshToken) return json({ error: "no_session" }, 401, clearedCookies());
+      const data = await supabaseAuth("token?grant_type=refresh_token", { refresh_token: refreshToken });
+      if (!hasAuthSession(data)) throw new AuthServiceError("auth_invalid_response", 502, "missing_session");
+      return json({ ok: true }, 200, sessionCookies(data.access_token, data.refresh_token, data.expires_in || 3600));
     }
-    const { response, data } = await supabaseAuth(
-      "token?grant_type=refresh_token",
-      { refresh_token: refreshToken },
-    );
-    if (!response.ok || !data.access_token || !data.refresh_token) {
-      return withCookies({ error: "session_expired" }, 401, clearedCookies());
-    }
-    return withCookies(
-      { ok: true },
-      200,
-      sessionCookies(data.access_token, data.refresh_token, data.expires_in || 3600),
-    );
-  }
+    const email = String(fields.email || "").trim().toLowerCase();
+    const password = String(fields.password || "");
+    if (!email.includes("@") || password.length < 8) return json({ error: "invalid_credentials_format" }, 400);
 
-  const email = String(body.email || "")
-    .trim()
-    .toLowerCase();
-  const password = String(body.password || "");
-  if (!email.includes("@") || password.length < 8) {
-    return Response.json({ error: "invalid_credentials_format" }, { status: 400 });
-  }
-
-  if (action === "signup") {
-    const displayName = String(body.displayName || "").trim().slice(0, 120);
-    const { response, data } = await supabaseAuth("signup", {
-      email,
-      password,
-      data: displayName ? { display_name: displayName } : undefined,
-    });
-    if (!response.ok) {
-      return Response.json(
-        { error: data.error_description || data.msg || "signup_failed" },
-        { status: response.status },
-      );
+    if (action === "signup") {
+      const displayName = String(fields.displayName || "").trim().slice(0, 120);
+      const data = await supabaseAuth("signup", { email, password, data: displayName ? { display_name: displayName } : undefined });
+      if (hasAuthSession(data)) return json({ ok: true }, 201, sessionCookies(data.access_token, data.refresh_token, data.expires_in || 3600));
+      const user = data.user as { id?: unknown } | undefined;
+      if (!data.access_token && !data.refresh_token &&
+          ((typeof data.id === "string" && data.id) || (typeof user?.id === "string" && user.id))) {
+        return json({ ok: true, confirmationRequired: true });
+      }
+      throw new AuthServiceError("auth_invalid_response", 502, "missing_signup_user");
     }
-    // Com confirmacao de e-mail ativada o Supabase nao devolve sessao aqui.
-    if (!data.access_token || !data.refresh_token) {
-      return Response.json({ ok: true, confirmationRequired: true });
+    const data = await supabaseAuth("token?grant_type=password", { email, password });
+    if (!hasAuthSession(data)) throw new AuthServiceError("auth_invalid_response", 502, "missing_session");
+    return json({ ok: true }, 200, sessionCookies(data.access_token, data.refresh_token, data.expires_in || 3600));
+  } catch (error) {
+    const failure = error instanceof AuthServiceError ? error : new AuthServiceError("auth_internal_error", 500, "unexpected_exception");
+    // An outage must not delete a valid refresh token. Only definitive session rejections do.
+    if (action === "refresh" && ["refresh_token_not_found", "refresh_token_already_used", "session_not_found", "session_expired", "invalid_credentials"].includes(failure.code)) {
+      return json({ error: "session_expired" }, 401, clearedCookies());
     }
-    return withCookies(
-      { ok: true },
-      201,
-      sessionCookies(data.access_token, data.refresh_token, data.expires_in || 3600),
-    );
+    const requestId = crypto.randomUUID();
+    if (failure.status >= 500) console.error("sambu_auth_error", JSON.stringify({
+      requestId, action, error: failure.code, reason: failure.reason, upstreamStatus: failure.upstreamStatus,
+    }));
+    return json({ error: failure.code, requestId }, failure.status);
   }
-
-  const { response, data } = await supabaseAuth("token?grant_type=password", {
-    email,
-    password,
-  });
-  if (!response.ok || !data.access_token || !data.refresh_token) {
-    return Response.json({ error: "invalid_credentials" }, { status: 401 });
-  }
-  return withCookies(
-    { ok: true },
-    200,
-    sessionCookies(data.access_token, data.refresh_token, data.expires_in || 3600),
-  );
 }

@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { authConfig } from "./lib/auth-service";
+export { authConfig } from "./lib/auth-service";
 
 export const ACCESS_COOKIE = "sb-access-token";
 export const REFRESH_COOKIE = "sb-refresh-token";
@@ -9,16 +11,6 @@ export type SessionUser = {
   email: string;
   displayName: string;
 };
-
-export function authConfig() {
-  const { SUPABASE_URL, SUPABASE_ANON_KEY } = process.env;
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    throw new Error(
-      "Supabase Auth nao configurado. Defina SUPABASE_URL e SUPABASE_ANON_KEY no ambiente.",
-    );
-  }
-  return { url: SUPABASE_URL.replace(/\/+$/, ""), anonKey: SUPABASE_ANON_KEY };
-}
 
 /**
  * Valida o access token contra o Supabase em vez de apenas decodificar o JWT.

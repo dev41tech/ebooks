@@ -37,6 +37,7 @@ Defina pelo painel de secrets do Easypanel, nunca no repositório:
 | `DATABASE_URL` | PostgreSQL; conexão Supabase adequada ao servidor. Driver usa `prepare:false`. |
 | `SUPABASE_URL` | URL HTTPS do projeto. |
 | `SUPABASE_ANON_KEY` | Autenticação Supabase. |
+| `SUPABASE_PUBLISHABLE_KEY` | Alternativa à chave `anon` para autenticação; tem prioridade quando preenchida. Use uma chave pública do mesmo projeto de `SUPABASE_URL`. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Acesso do servidor ao Storage. |
 | `SUPABASE_STORAGE_BUCKET` | Bucket privado; padrão `sambu`. |
 | `VINEXT_TRUSTED_HOSTS` | Hosts públicos aceitos do proxy, sem protocolo nem caminho. O Dockerfile já define `ebooks.41tech.cloud`. Em homologação com outro domínio, substitua pelo host exato. |
@@ -53,6 +54,33 @@ O proprietário precisa definir/desbloquear a senha master pelo painel. O cadast
 O Easypanel termina o HTTPS e encaminha HTTP ao container. O servidor Vinext precisa reconhecer os cabeçalhos do proxy para reconstruir o endereço público antes de comparar o `Origin`. A imagem já configura `VINEXT_TRUSTED_HOSTS=ebooks.41tech.cloud`; após atualizar a `main`, clique em **Implantar**. Se houver uma variável de mesmo nome no ambiente do serviço, ela deve conter esse host, pois o Easypanel pode substituir o padrão da imagem.
 
 Para corrigir uma imagem anterior sem mudar código, adicione essa mesma variável em **app → ebooks → Ambiente**, salve e reimplante. O proxy deve enviar `X-Forwarded-Proto: https` e `X-Forwarded-Host: ebooks.41tech.cloud`. Não use curingas nem libere todas as origens. As verificações de origem do cadastro/login, master, backup e importação continuam ativas; requisições de outros sites continuam bloqueadas. Se usar um comando de inicialização fora do Docker, configure também a variável nesse ambiente.
+
+### Cadastro com erro 500 ou mensagem de indisponibilidade
+
+Após reimplantar a `main`, o cadastro retorna erros JSON e uma referência que pode ser localizada nos logs `sambu_auth_error`. Esses logs mostram somente ação, código, motivo e status do provedor; não registram e-mail, senha, chaves, tokens ou a resposta bruta do Supabase.
+
+No **Console do serviço ebooks**, execute:
+
+```sh
+node /app/scripts/check-auth.mjs
+```
+
+O comando consulta apenas as configurações do Supabase Auth. Não cria usuários, não envia e-mails e não modifica dados. Pode compartilhar a saída: os valores das variáveis e as credenciais não são exibidos. Um resultado `ok: true` confirma a conexão e mostra se o cadastro por e-mail está habilitado, mas não comprova o envio SMTP nem a criação de usuários no banco.
+
+| Motivo/código | O que verificar no Easypanel ou Supabase |
+| --- | --- |
+| `missing_supabase_url` | Preencher `SUPABASE_URL` em Ambiente com a URL do projeto. |
+| `missing_supabase_public_key` | Preencher `SUPABASE_ANON_KEY` ou `SUPABASE_PUBLISHABLE_KEY` do mesmo projeto. |
+| `invalid_supabase_url` | Usar a URL base do projeto, sem `/auth/v1`, `/rest/v1`, usuário/senha ou parâmetros. |
+| `invalid_supabase_public_key` / `api_key_rejected` | Conferir a chave pública e se ela continua ativa no projeto; não usar `sb_secret_` nesse campo. |
+| `ENOTFOUND` / `EAI_AGAIN` | Conferir o domínio do projeto e a resolução DNS na VPS. |
+| `ECONNREFUSED` / `network_error` / `timeout` | Verificar disponibilidade do projeto, conexão de saída da VPS e HTTPS. |
+| `non_json_or_invalid_body` / `invalid_settings` | A URL/proxy está devolvendo conteúdo diferente da API esperada. |
+| `provider_server_error` | Consultar os logs do Supabase Auth; pode haver falha no provedor, SMTP ou gatilho de cadastro. |
+| `emailSignup: disabled` | Verificar as opções de novos cadastros e provedor de e-mail no Supabase Auth. |
+| `email_address_not_authorized` | Configurar SMTP próprio para enviar confirmações a leitores fora da organização Supabase. |
+
+Depois de ajustar o ambiente, salve e reimplante. Não desative confirmação de e-mail, CAPTCHA ou outras proteções como solução automática. Não há senha padrão de usuário no Sambu.
 
 ## Homologação antes do merge
 
