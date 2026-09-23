@@ -1,17 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { authErrorMessage } from "../lib/auth-messages";
 
 type Mode = "login" | "signup";
-
-const messages: Record<string, string> = {
-  invalid_credentials: "E-mail ou senha incorretos.",
-  invalid_credentials_format:
-    "Informe um e-mail válido e uma senha de pelo menos 8 caracteres.",
-  signup_failed: "Não foi possível criar a conta.",
-  invalid_origin:
-    "O acesso está indisponível neste endereço. Avise a administração do Sambu.",
-};
 
 export default function LoginForm({ returnTo }: { returnTo: string }) {
   const [mode, setMode] = useState<Mode>("login");
@@ -34,13 +26,20 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: mode, email, password, displayName }),
       });
-      const data = (await response.json().catch(() => ({}))) as {
+      const parsed = await response.json().catch(() => null);
+      const data = (parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}) as {
+        ok?: boolean;
         error?: string;
+        requestId?: string;
         confirmationRequired?: boolean;
       };
 
       if (!response.ok) {
-        setError(messages[data.error || ""] || data.error || "Erro inesperado.");
+        setError(authErrorMessage(data.error, response.status, data.requestId));
+        return;
+      }
+      if (data.ok !== true) {
+        setError(authErrorMessage("auth_invalid_response", 502));
         return;
       }
       if (data.confirmationRequired) {
