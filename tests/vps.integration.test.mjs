@@ -501,3 +501,54 @@ test('private supplied backup restores every published book, cover and first cha
  assert.deepEqual(await db.prepare('SELECT (SELECT count(*) FROM profiles) AS profiles,(SELECT count(*) FROM reading_progress) AS progress').first(),privateCounts);
  console.log('Private backup verified: '+items.length+' books, covers and chapter reads.');
 });
+
+test('temporary public administration uploads, reviews, publishes, reads and imports the ZIP catalog without master',async()=>{
+ const guest='public-test@sambu.invalid';
+ identity.email=reader;identity.cookie='';
+ const privateFavorites=await (await routes.favorites.GET()).json();
+ const privateProgress=await (await routes.progress.GET()).json();
+ const masterBefore=await db.prepare('SELECT * FROM master_credentials').all();
+ identity.email=guest;identity.temporary=true;
+ try{
+  const session=await (await routes.session.GET()).json();
+  assert.equal(session.user.temporaryAdmin,true);assert.equal(session.user.admin,true);assert.equal(session.user.participant,true);
+  assert.equal((await routes.books.GET()).status,200);
+  const init=await routes.uploads.POST(payload({action:'init',fileName:'open-test.epub',size:epub.length}));assert.equal(init.status,200);
+  const {uploadId}=await init.json();
+  const part=await routes.uploads.POST(payload({action:'part',uploadId,part:0,data:Buffer.from(epub).toString('base64')}));assert.equal(part.status,200);
+  const complete=await routes.uploads.POST(payload({action:'complete',uploadId,totalParts:1,size:epub.length}));assert.equal(complete.status,200);
+  const uploaded=await complete.json();
+  const staged=await routes.imports.POST(formRequest({mode:'individual',title:'Livro de teste',author:'Autor de teste',genre:'Suspense',description:'Teste de acesso aberto.',licenseType:'Autorização do autor',uploadedFiles:JSON.stringify([uploaded])},'POST'));
+  assert.equal(staged.status,201);
+  const item=await db.prepare('SELECT id,owner_email FROM staging_books WHERE storage_key=?').bind(uploaded.storageKey).first();
+  assert.equal(item.owner_email,guest);
+  const published=await routes.imports.PATCH(review(item.id));assert.equal(published.status,200);
+  const {publishedBookId:id}=await published.json();
+  assert.equal((await routes.content.GET(new Request(`https://sambu.test/api?id=${id}&chapter=0`))).status,200);
+  assert.equal((await routes.favorites.POST(payload({bookId:id,favorite:true}))).status,200);
+  assert.equal((await routes.progress.POST(payload({bookId:id,position:1,progress:50,revision:0}))).status,200);
+
+  const book={...transferRecord,id:'public-backup-book',slug:'public-backup-book'};
+  assert.equal((await routes.transfer.GET()).status,200);
+  assert.equal((await routes.transfer.POST(transferRequest(book,uploaded.storageKey,epub,'https://evil.test'))).status,403);
+  const imported=await routes.transfer.POST(transferRequest(book,uploaded.storageKey));assert.equal(imported.status,201,await imported.text());
+  assert.equal((await routes.content.GET(new Request(`https://sambu.test/api?id=${book.id}&chapter=0`))).status,200);
+
+  assert.equal((await routes.books.POST(payload({title:'Bypass review'}))).status,403);
+  assert.equal((await routes.books.PATCH(payload({id,title:'Do not change'},'PATCH'))).status,403);
+  assert.equal((await routes.books.DELETE(payload({id,confirmTitle:'Livro de teste'},'DELETE'))).status,403);
+  assert.equal((await db.prepare('SELECT title FROM books WHERE id=?').bind(id).first()).title,'Livro de teste');
+  assert.ok(await env.BUCKET.head(uploaded.storageKey));
+  // Public book administration does not expose real-account personal data or master credentials.
+  assert.equal((await routes.master.GET()).status,403);
+  assert.equal((await routes.master.POST(masterRequest('setup'))).status,403);
+  assert.equal((await routes.backup.POST(payload({}))).status,403);
+  assert.equal((await routes.beta.GET()).status,403);
+  assert.equal((await routes.profile.PATCH(payload({displayName:'Do not collect personal data'},'PATCH'))).status,403);
+  assert.equal((await (await routes.profile.GET()).json()).profile,null);
+  assert.deepEqual(await db.prepare('SELECT * FROM master_credentials').all(),masterBefore);
+ }finally{identity.temporary=false;identity.email=reader;identity.cookie='';}
+ assert.deepEqual(await (await routes.favorites.GET()).json(),privateFavorites);
+ assert.deepEqual(await (await routes.progress.GET()).json(),privateProgress);
+ identity.email=null;assert.equal((await routes.books.GET()).status,401);
+});

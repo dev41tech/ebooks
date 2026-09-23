@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { REFRESH_COOKIE, clearedCookies, sessionCookies } from "../../auth";
 import { AuthServiceError, hasAuthSession, supabaseAuth } from "../../lib/auth-service";
+import { temporaryAdminEnabled } from "../../lib/temporary-access";
 
 function json(body: unknown, status = 200, setCookies: string[] = []) {
   const headers = new Headers({ "content-type": "application/json", "cache-control": "no-store" });
@@ -21,6 +22,7 @@ export async function POST(request: Request) {
   }
   try {
     if (action === "logout") return json({ ok: true }, 200, clearedCookies());
+    if (temporaryAdminEnabled()) return json({ error:"temporary_access_enabled" },409);
     if (action === "refresh") {
       const refreshToken = (await cookies()).get(REFRESH_COOKIE)?.value;
       if (!refreshToken) return json({ error: "no_session" }, 401, clearedCookies());

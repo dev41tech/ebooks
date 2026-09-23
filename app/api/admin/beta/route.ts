@@ -3,6 +3,7 @@ import {requireAccess} from '../../../lib/access';
 import {feedbackStatus} from '../../../lib/beta';
 export async function GET(){
  const access=await requireAccess('admin');if(access.error)return access.error;
+ if(access.temporaryAdmin)return Response.json({error:'private_admin_required'},{status:403});
  try{
  const since=new Date(Date.now()-14*86400000).toISOString();
  const [activity,failures,feedback,ratings,books,counts]=await Promise.all([
@@ -25,6 +26,7 @@ export async function GET(){
 }
 export async function PATCH(request:Request){
  const access=await requireAccess('admin');if(access.error)return access.error;
+ if(access.temporaryAdmin)return Response.json({error:'private_admin_required'},{status:403});
  const body=await request.json().catch(()=>null) as {id:string;status:string}|null;
  if(!body||typeof body.id!=='string'||!Object.hasOwn(feedbackStatus,body.status))return Response.json({error:'invalid_status'},{status:400});
  const result=await env.DB.prepare('UPDATE beta_feedback SET status=?,updated_at=? WHERE id=?').bind(body.status,new Date().toISOString(),body.id).run();

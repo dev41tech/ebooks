@@ -19,6 +19,7 @@ const limits: Record<string, number> = {
 export async function POST(request: Request) {
   const access = await requireAccess("admin");
   if (access.error) return access.error;
+  if (access.temporaryAdmin) return Response.json({error:"temporary_readonly_catalog"},{status:403});
   const user = access.user!;
   const form = await request.formData();
   const file = form.get("file");

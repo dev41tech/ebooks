@@ -10,6 +10,7 @@ import {extractEpub} from '../../../lib/epub';
 async function ownerAccess() {
  const access=await requireAccess('admin');
  if(access.error) return access;
+ if(access.temporaryAdmin) return access;
  if(!access.ownerAdmin || !await masterUnlocked(access.user!.email)) return {...access,error:Response.json({error:'owner_master_required'},{status:403})};
  return access;
 }

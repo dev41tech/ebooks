@@ -1,4 +1,5 @@
 const messages: Record<string, string> = {
+  temporary_access_enabled: "O Sambu está temporariamente aberto. Acesse a página inicial para continuar sem login.",
   invalid_credentials: "E-mail ou senha incorretos.",
   invalid_credentials_format: "Informe um e-mail válido e uma senha de pelo menos 8 caracteres.",
   invalid_payload: "Confira os dados e tente novamente.",

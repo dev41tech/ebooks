@@ -4,10 +4,11 @@ import { masterUnlocked } from "./master";
 import { accessFor, emailList } from "./policy";
 export async function sessionAccess() {
   const user = await getUser();
+  if (user?.temporary) return { user, admin:true, participant:true, ownerAdmin:false, adminTrial:true, temporaryAdmin:true };
   const config = env as unknown as Record<string, unknown>;
   const access=accessFor(user?.email, config.SAMBU_ADMIN_EMAILS || config.ADMIN_EMAILS, config.SAMBU_BETA_EMAILS, config.SAMBU_BETA_OPEN ?? "true");
   const adminTrial=!!user && emailList(config.SAMBU_ADMIN_TESTER_EMAILS).includes(user.email.toLowerCase());
-  return { user, ...access, ownerAdmin:access.admin, adminTrial, admin:access.admin||adminTrial, participant:access.participant||adminTrial };
+  return { user, ...access, ownerAdmin:access.admin, adminTrial, admin:access.admin||adminTrial, participant:access.participant||adminTrial, temporaryAdmin:false };
 }
 export async function requireAccess(role: "admin" | "participant") {
   const session = await sessionAccess();
