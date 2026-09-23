@@ -1,6 +1,7 @@
 'use client';
 import {useRef,useState} from 'react';
 import {apiFetch} from '../lib/client-api';
+import {importErrorMessage} from '../lib/import-messages';
 import {extractBackupBook,inspectCatalogBackup,MAX_BACKUP_BYTES,type BackupBook} from '../lib/catalog-transfer';
 
 const messages:Record<string,string>={
@@ -22,7 +23,7 @@ const messages:Record<string,string>={
 };
 async function jsonResponse(response:Response){
  const data=await response.json().catch(()=>({}));
- if(!response.ok)throw new Error(messages[data.error] || `Não foi possível concluir a transferência (HTTP ${response.status}). Tente novamente.`);
+ if(!response.ok)throw new Error(importErrorMessage(data,messages[data.error] || `Não foi possível concluir a transferência (HTTP ${response.status}). Tente novamente.`));
  return data;
 }
 async function post(url:string,body:unknown){
@@ -72,6 +73,10 @@ export default function CatalogTransfer(){
    for(const item of items){
     const conflicts=existing.filter(b=>b.id===item.book.id || (item.book.slug && b.slug===item.book.slug));
     if(conflicts.some(b=>b.id!==item.book.id || b.status!=='published'))throw new Error(messages.book_conflict);
+   }
+   if(items.some(item=>!existing.some(book=>book.id===item.book.id))){
+    setStage('Verificando conexão com o armazenamento…');
+    await jsonResponse(await apiFetch('/api/admin/uploads',{cache:'no-store',signal:AbortSignal.timeout(20000)}));
    }
    let added=0,skipped=0;
    for(let i=0;i<items.length;i++){

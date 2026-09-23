@@ -1,15 +1,11 @@
 import {database} from './sql';
+import {storageConfig,storageFetch,storageResponseError} from './storage-service';
 type Metadata={contentType?:string};
 type GetOptions={range?:{offset:number;length:number};onlyIf?:{etagMatches:string}};
 type PutOptions={size?:number;httpMetadata?:Metadata;customMetadata?:Record<string,string>};
-function config(){
- const {SUPABASE_URL:url,SUPABASE_SERVICE_ROLE_KEY:key,SUPABASE_STORAGE_BUCKET:bucket='sambu'}=process.env;
- if(!url||!key)throw new Error('Supabase Storage não configurado');
- return {url:url.replace(/\/+$/,''),key,bucket};
-}
-function objectUrl(key:string){
+function objectPath(key:string){
  if(!key||key.startsWith('/')||key.includes('\\')||key.includes('\0')||key.split('/').some(x=>x==='.'||x==='..'))throw new Error('invalid_storage_key');
- const c=config();return {url:c.url+'/storage/v1/object/'+encodeURIComponent(c.bucket)+'/'+key.split('/').map(encodeURIComponent).join('/'),headers:{authorization:'Bearer '+c.key,apikey:c.key}};
+ return 'object/'+encodeURIComponent(storageConfig().bucket)+'/'+key.split('/').map(encodeURIComponent).join('/');
 }
 async function metadata(key:string){
  const row=await database.prepare('SELECT metadata FROM storage_metadata WHERE key=?').bind(key).first<{metadata:Record<string,string>}>();
@@ -22,14 +18,18 @@ function info(response:Response,key:string,customMetadata:Record<string,string>)
  return {key,etag:etag.replace(/^"|"$/g,''),httpEtag:etag,size,customMetadata,httpMetadata:{contentType:response.headers.get('content-type')||'application/octet-stream'},writeHttpMetadata(headers:Headers){headers.set('content-type',response.headers.get('content-type')||'application/octet-stream');}};
 }
 async function storageRequest(key:string,method:string,headers:Record<string,string>={},body?:BodyInit){
- const target=objectUrl(key);
- return fetch(target.url,{method,headers:{...target.headers,...headers},...(body!==undefined?{body,duplex:'half'}:{}),cache:'no-store',signal:AbortSignal.timeout(120000)} as RequestInit);
+ return storageFetch(objectPath(key),method,headers,body);
 }
 export const bucket={
  async head(key:string){
   const response=await storageRequest(key,'HEAD');
-  if(response.status===404)return null;
-  if(!response.ok)throw new Error('storage_head_failed:'+response.status);
+  // A legacy HEAD 400 has no error body. Probe one byte to distinguish missing from denied.
+  if(response.status===400){
+   const probe=await storageRequest(key,'GET',{Range:'bytes=0-0'});
+   if(!probe.ok){const error=await storageResponseError(probe);if(error.code==='storage_object_missing')return null;throw error;}
+   await probe.body?.cancel();
+  }
+  if(!response.ok){const error=await storageResponseError(response);if(error.code==='storage_object_missing')return null;throw error;}
   return info(response,key,await metadata(key));
  },
  async get(key:string,options?:GetOptions){
@@ -37,8 +37,9 @@ export const bucket={
   if(options?.range){const {offset,length}=options.range;if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(length)||length<1)throw new Error('invalid_range');headers.Range='bytes='+offset+'-'+(offset+length-1);}
   if(options?.onlyIf)headers['If-Match']='"'+options.onlyIf.etagMatches+'"';
   const response=await storageRequest(key,'GET',headers);
-  if(response.status===404||response.status===412)return null;
-  if(!response.ok||!response.body)throw new Error('storage_get_failed:'+response.status);
+  if(response.status===412)return null;
+  if(!response.ok){const error=await storageResponseError(response);if(error.code==='storage_object_missing')return null;throw error;}
+  if(!response.body)throw new Error('storage_body_unavailable');
   // Fail closed if the provider ignored conditional/range headers.
   if(options?.onlyIf&&response.headers.get('etag')?.replace(/^"|"$/g,'')!==options.onlyIf.etagMatches){await response.body.cancel();return null;}
   if(options?.range&&response.status!==206){await response.body.cancel();throw new Error('storage_range_not_supported');}
@@ -49,12 +50,12 @@ export const bucket={
   const headers:Record<string,string>={'content-type':options?.httpMetadata?.contentType||'application/octet-stream','x-upsert':'true'};
   if(options?.size!==undefined){if(!Number.isSafeInteger(options.size)||options.size<0)throw new Error('invalid_upload_size');headers['content-length']=String(options.size);}
   const response=await storageRequest(key,'POST',headers,body as BodyInit);
-  if(!response.ok)throw new Error('storage_put_failed:'+response.status);
+  if(!response.ok)throw await storageResponseError(response);
   await database.prepare('INSERT INTO storage_metadata(key,metadata,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET metadata=excluded.metadata,updated_at=excluded.updated_at').bind(key,JSON.stringify(options?.customMetadata||{}),new Date().toISOString()).run();
  },
  async delete(key:string){
   const response=await storageRequest(key,'DELETE');
-  if(!response.ok&&response.status!==404)throw new Error('storage_delete_failed:'+response.status);
+  if(!response.ok){const error=await storageResponseError(response);if(error.code!=='storage_object_missing')throw error;}
   await database.prepare('DELETE FROM storage_metadata WHERE key=?').bind(key).run();
  }
 };
