@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { authConfig } from "./lib/auth-service";
+import { userForAccessToken } from "./lib/auth-local";
 import { temporaryAdminEnabled, TEMPORARY_USER } from "./lib/temporary-access";
 export { authConfig } from "./lib/auth-service";
 
@@ -15,39 +15,27 @@ export type SessionUser = {
 };
 
 /**
- * Valida o access token contra o Supabase em vez de apenas decodificar o JWT.
- * Custa um fetch por requisicao, mas respeita revogacao de sessao e nao depende
- * de sabermos o algoritmo de assinatura do projeto (HS256 legado vs. chaves
- * assimetricas dos projetos novos).
+ * Resolve a sessao contra a tabela `auth_sessions` do proprio Postgres.
+ *
+ * Antes isto era um fetch ao `/auth/v1/user` do Supabase. O projeto que servia
+ * esse endereco deixou de existir -- o host devolve NXDOMAIN --, entao a
+ * validacao passou a falhar para todo mundo e a unica porta que restou foi o
+ * modo temporario, que da admin a qualquer visitante.
+ *
+ * A troca mantem a propriedade que motivava o fetch: a sessao e consultada a
+ * cada requisicao, entao logout e troca de senha revogam de verdade. O que sai
+ * e a dependencia de rede -- agora e uma consulta ao banco que ja e obrigatorio
+ * para o app subir.
  */
 export async function getUser(): Promise<SessionUser | null> {
   if (temporaryAdminEnabled()) return TEMPORARY_USER;
   const token = (await cookies()).get(ACCESS_COOKIE)?.value;
   if (!token) return null;
 
-  const { url, anonKey } = authConfig();
-  const response = await fetch(`${url}/auth/v1/user`, {
-    headers: { authorization: `Bearer ${token}`, apikey: anonKey },
-    cache: "no-store",
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!response.ok) return null;
+  const user = await userForAccessToken(token);
+  if (!user) return null;
 
-  const payload = (await response.json()) as {
-    id?: string;
-    email?: string;
-    user_metadata?: { display_name?: string; full_name?: string };
-  };
-  if (!payload.id || !payload.email) return null;
-
-  return {
-    id: payload.id,
-    email: payload.email.toLowerCase(),
-    displayName:
-      payload.user_metadata?.display_name ||
-      payload.user_metadata?.full_name ||
-      payload.email,
-  };
+  return { id: user.id, email: user.email, displayName: user.displayName };
 }
 
 export async function requireUser(returnTo: string): Promise<SessionUser> {
