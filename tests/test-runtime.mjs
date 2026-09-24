@@ -19,4 +19,5 @@ function makeBucket(){
  };
 }
 export const bucket=new Proxy({},{get(_target,name){const value=env.BUCKET[name];return typeof value==='function'?value.bind(env.BUCKET):value;}});
+export async function checkStorage(){return {ready:true};}
 export const database={prepare:(...args)=>env.DB.prepare(...args)};

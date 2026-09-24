@@ -1,7 +1,6 @@
-import {checkStorage} from '../../../../db/storage-service';
 import {withImportErrors} from '../../../lib/import-errors';
 import {requireAccess} from '../../../lib/access';
-import {bucket} from '../../../../db/storage';
+import {bucket,checkStorage} from '../../../../db/storage';
 const CHUNK_SIZE=250_000,MAX_FILE_SIZE=250_000_000,MAX_PARTS=1000;
 const validId=(id:string)=>/^[a-f0-9-]{36}$/i.test(id);
 const prefix=(email:string,id:string)=>'imports/direct/'+encodeURIComponent(email.toLowerCase())+'/'+id;

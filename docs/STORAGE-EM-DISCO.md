@@ -43,6 +43,25 @@ Supabase por natureza — é mais seguro por estar montado.
 Se `STORAGE_DIR` não estiver definida, a chamada falha com `storage_dir_missing`
 em vez de gravar num caminho arbitrário.
 
+### Verificação antes da importação
+
+`GET /api/admin/uploads` usa o mesmo driver escolhido para os arquivos. Com
+`STORAGE_DRIVER=disk`, verifica se `STORAGE_DIR` é um caminho absoluto, existe
+como diretório e permite leitura, escrita e acesso. Não consulta o Supabase e
+não cria arquivos. A verificação exige acesso administrativo, inclusive no
+modo temporário já existente; não amplia permissões nem renova sua validade.
+
+O Dockerfile prepara `/app/storage` com o usuário `sambu` (UID 1001). Monte o
+volume persistente nesse caminho. Um volume já existente precisa permitir
+acesso a esse usuário; não apague um volume para corrigir permissões.
+
+As mensagens na interface distinguem pasta ausente, caminho inválido e falta
+de permissão. A verificação não comprova que a pasta é um volume persistente,
+nem a cota disponível: confira a montagem no Easypanel e valide um envio.
+
+O login continua independente do driver dos arquivos. Caso use o modo
+temporário de importação, ele precisa estar habilitado com prazo ainda válido.
+
 ## Como funciona
 
 `db/storage.ts` escolhe o driver e exporta o mesmo `bucket` de sempre

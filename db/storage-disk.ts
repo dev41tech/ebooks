@@ -27,6 +27,7 @@ import path from 'node:path';
 import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import {assertStorageKey,readCustomMetadata,writeCustomMetadata,deleteCustomMetadata} from './storage-meta';
+import {StorageServiceError} from './storage-service';
 
 type Metadata={contentType?:string};
 type GetOptions={range?:{offset:number;length:number};onlyIf?:{etagMatches:string}};
@@ -37,8 +38,26 @@ const DEFAULT_TYPE='application/octet-stream';
 
 export function storageRoot(){
  const dir=process.env.STORAGE_DIR?.trim();
- if(!dir)throw new Error('storage_dir_missing');
+ if(!dir)throw new StorageServiceError('storage_dir_missing',503,'missing_storage_dir');
+ if(!path.isAbsolute(dir))throw new StorageServiceError('storage_dir_invalid',503,'relative_storage_dir');
  return path.resolve(dir);
+}
+
+/** Checks the configured directory without creating files or contacting Supabase. */
+export async function checkDiskStorage(){
+ const root=storageRoot();
+ try{
+  const stat=await fsp.stat(root);
+  if(!stat.isDirectory())throw new StorageServiceError('storage_dir_invalid',503,'not_a_directory');
+  await fsp.access(root,fs.constants.R_OK|fs.constants.W_OK|fs.constants.X_OK);
+  return {ready:true};
+ }catch(error){
+  if(error instanceof StorageServiceError)throw error;
+  const code=(error as NodeJS.ErrnoException).code;
+  if(code==='ENOENT')throw new StorageServiceError('storage_dir_unavailable',503,'storage_dir_not_found');
+  if(code==='EACCES'||code==='EPERM')throw new StorageServiceError('storage_dir_access_denied',503,'storage_dir_permissions');
+  throw new StorageServiceError('storage_disk_unavailable',503,'disk_check_failed');
+ }
 }
 
 /**
