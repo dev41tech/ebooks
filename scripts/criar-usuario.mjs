@@ -15,7 +15,10 @@
 //
 // Ser admin não vem daqui: continua saindo de SAMBU_ADMIN_EMAILS (ou
 // ADMIN_EMAILS) no ambiente do app.
-import 'dotenv/config';
+// `dotenv` não é dependência deste projeto -- os scripts daqui leem o ambiente
+// direto, e em produção quem fornece é o EasyPanel. O carregamento de .env fica
+// opcional, para quem roda da própria máquina com um arquivo local.
+try{await import('dotenv/config');}catch{}
 import {createInterface} from 'node:readline';
 import postgres from 'postgres';
 import {randomBytes, randomUUID, scrypt} from 'node:crypto';

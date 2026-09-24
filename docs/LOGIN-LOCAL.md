@@ -18,9 +18,15 @@ A camada de **autorização** já era local: quem é admin sai de
 
 ## Criar o primeiro usuário
 
+No repositório do **portal** (`dev41tech/ebooks`), não no do gerador:
+
 ```bash
 node scripts/criar-usuario.mjs marcos@exemplo.com "Marcos Dias"
 ```
+
+`DATABASE_URL` vem do ambiente — o script não depende de `.env` (`dotenv` não é
+dependência deste projeto). Da sua máquina, passe a string do banco do **portal**
+na própria chamada; no servidor, ela já está no ambiente.
 
 A senha é pedida pelo terminal, sem eco. **Não passe a senha por argumento**: ela
 ficaria no histórico do shell e na lista de processos da máquina. Para uso
