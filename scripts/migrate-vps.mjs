@@ -2,7 +2,7 @@ import postgres from 'postgres';
 import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-const migrationNames = ['0002_book_classification', '0003_beta_r26_vps'];
+const migrationNames = ['0002_book_classification', '0003_beta_r26_vps', '0004_auth_local'];
 
 export async function migrate(sql) {
  const migrations = await Promise.all(migrationNames.map(async name => {
