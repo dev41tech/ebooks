@@ -1,4 +1,9 @@
 const messages:Record<string,string>={
+ storage_dir_missing:'Configure STORAGE_DIR=/app/storage e monte um volume persistente nesse caminho no Easypanel. Depois implante novamente.',
+ storage_dir_invalid:'STORAGE_DIR deve apontar para uma pasta com caminho absoluto, como /app/storage.',
+ storage_dir_unavailable:'A pasta dos livros não existe. Confira o volume montado no caminho de STORAGE_DIR e implante novamente.',
+ storage_dir_access_denied:'O aplicativo não tem permissão para acessar a pasta dos livros. Ajuste as permissões do volume para o usuário sambu (UID 1001).',
+ storage_disk_unavailable:'Não foi possível acessar o disco dos livros. Confira o volume no Easypanel e a referência nos logs.',
  storage_url_missing:'Configure SUPABASE_URL em Ambiente no Easypanel e implante novamente.',
  storage_url_invalid:'Confira SUPABASE_URL em Ambiente no Easypanel: use apenas a URL do projeto Supabase.',
  storage_key_missing:'Falta a chave de armazenamento. Configure SUPABASE_SECRET_KEY ou SUPABASE_SERVICE_ROLE_KEY em Ambiente no Easypanel e implante novamente.',

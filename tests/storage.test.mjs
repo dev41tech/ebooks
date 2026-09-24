@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {before,after,test} from 'node:test';
-import {mkdir,rm} from 'node:fs/promises';
+import {mkdir,rm,mkdtemp,readdir,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
 import {pathToFileURL} from 'node:url';
 import path from 'node:path';
 import {build} from 'esbuild';
@@ -27,6 +28,7 @@ before(async()=>{
   b.onResolve({filter:/lib\/access$/},()=>({path:'test-access',namespace:'test'}));
   b.onLoad({filter:/.*/,namespace:'test'},args=>({contents:args.path==='test-db'?'export const database=globalThis.__storageTestDb;':'export const requireAccess=()=>globalThis.__storageTestAccess();'}));
  }}]});
+ process.env.STORAGE_DRIVER='supabase';
  api=await import(pathToFileURL(path.join(output,'uploads.mjs')));
  ({bucket}=await import(pathToFileURL(path.join(output,'storage.mjs'))));
  messages=await import(pathToFileURL(path.join(output,'messages.mjs')));
@@ -57,7 +59,7 @@ before(async()=>{
 });
 after(async()=>{
  globalThis.fetch=originalFetch;
- for(const name of ['SUPABASE_URL','SUPABASE_SECRET_KEY','SUPABASE_SERVICE_ROLE_KEY','SUPABASE_STORAGE_BUCKET'])if(originalEnv[name]===undefined)delete process.env[name];else process.env[name]=originalEnv[name];
+ for(const name of ['SUPABASE_URL','SUPABASE_SECRET_KEY','SUPABASE_SERVICE_ROLE_KEY','SUPABASE_STORAGE_BUCKET','STORAGE_DRIVER','STORAGE_DIR'])if(originalEnv[name]===undefined)delete process.env[name];else process.env[name]=originalEnv[name];
  delete globalThis.__storageTestDb;delete globalThis.__storageTestAccess;
  await rm(output,{recursive:true,force:true});
 });
@@ -120,4 +122,43 @@ test('chunk upload completes using the real Storage adapter, including legacy HE
 });
 test('unrecognized error bodies and request IDs never become user-visible raw text',()=>{
  assert.equal(messages.importErrorMessage({error:'private',requestId:'private'},'Falha'),'Falha');
+});
+
+test('disk preflight and complete upload use the same driver without any Supabase request',async()=>{
+ const dir=await mkdtemp(path.join(tmpdir(),'sambu-preflight-'));
+ const previous={...process.env};
+ process.env.STORAGE_DRIVER='disk';process.env.STORAGE_DIR=dir;
+ for(const name of ['SUPABASE_URL','SUPABASE_SECRET_KEY','SUPABASE_SERVICE_ROLE_KEY'])delete process.env[name];
+ const diskApi=await import(pathToFileURL(path.join(output,'uploads.mjs'))+'?driver=disk');
+ const diskStorage=await import(pathToFileURL(path.join(output,'storage.mjs'))+'?driver=disk');
+ const oldLog=console.error;console.error=()=>{};
+ calls=[];
+ try{
+  const ready=await diskApi.GET();assert.equal(ready.status,200);assert.deepEqual(await ready.json(),{ready:true});
+  assert.deepEqual(await readdir(dir),[],'preflight must not create files');
+  const init=await diskApi.POST(post({action:'init',fileName:'book.epub',size:3}));assert.equal(init.status,200);
+  const {uploadId}=await init.json();
+  const part=await diskApi.PUT(new Request(`${origin}/api/admin/uploads?uploadId=${uploadId}&part=0`,{method:'PUT',body:new Uint8Array([65,66,67])}));assert.equal(part.status,200);
+  const complete=await diskApi.POST(post({action:'complete',uploadId,totalParts:1,size:3}));assert.equal(complete.status,200);
+  const {storageKey}=await complete.json();
+  assert.equal(await (await diskStorage.bucket.get(storageKey)).text(),'ABC');
+  assert.equal((await diskStorage.bucket.head(storageKey)).customMetadata.owner,'tester@example.test');
+  assert.equal((await diskApi.POST(post({action:'complete',uploadId,totalParts:1,size:3}))).status,200);
+  assert.equal(calls.length,0,'disk mode must not contact Supabase');
+
+  const existingFile=path.join(dir,'not-a-directory');await writeFile(existingFile,'x');
+  for(const [value,code] of [['','storage_dir_missing'],['relative/path','storage_dir_invalid'],[path.join(dir,'absent'),'storage_dir_unavailable'],[existingFile,'storage_dir_invalid']]){
+   process.env.STORAGE_DIR=value;
+   const result=await diskApi.GET();assert.equal(result.status,503);
+   const data=await result.json();assert.equal(data.error,code);assert.ok(data.requestId);
+   assert.ok(!messages.importErrorMessage(data,'fallback').startsWith('fallback'));
+   assert.ok(!JSON.stringify(data).includes(dir));
+  }
+  assert.equal(calls.length,0);
+  allowed=false;assert.equal((await diskApi.GET()).status,401,'access must be checked before storage');
+ }finally{
+  allowed=true;console.error=oldLog;
+  for(const name of ['SUPABASE_URL','SUPABASE_SECRET_KEY','SUPABASE_SERVICE_ROLE_KEY','STORAGE_DRIVER','STORAGE_DIR'])if(previous[name]===undefined)delete process.env[name];else process.env[name]=previous[name];
+  await rm(dir,{recursive:true,force:true});
+ }
 });

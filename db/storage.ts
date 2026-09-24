@@ -1,5 +1,5 @@
-import {storageConfig,storageFetch,storageResponseError} from './storage-service';
-import {diskBucket} from './storage-disk';
+import {storageConfig,storageFetch,storageResponseError,checkStorage as checkSupabaseStorage} from './storage-service';
+import {diskBucket,checkDiskStorage} from './storage-disk';
 import {assertStorageKey,readCustomMetadata,writeCustomMetadata,deleteCustomMetadata} from './storage-meta';
 type Metadata={contentType?:string};
 type GetOptions={range?:{offset:number;length:number};onlyIf?:{etagMatches:string}};
@@ -67,7 +67,10 @@ const supabaseBucket={
  * O default segue `supabase`, para que um deploy sem a variavel nova se comporte
  * exatamente como antes.
  */
-export const bucket=(process.env.STORAGE_DRIVER?.trim()||'supabase')==='disk'?diskBucket:supabaseBucket;
+const useDisk=(process.env.STORAGE_DRIVER?.trim()||'supabase')==='disk';
+export const bucket=useDisk?diskBucket:supabaseBucket;
+// Preflight must use the same driver selected for uploads and reading.
+export async function checkStorage(){return useDisk?checkDiskStorage():checkSupabaseStorage();}
 
 // Existing studio/import scripts continue using the same storage entry points.
 export async function getObject(key:string){const obj=await bucket.get(key);return obj?{...obj,contentType:obj.httpMetadata.contentType}:null;}

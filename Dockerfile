@@ -25,6 +25,7 @@ ENV NODE_ENV=production \
     VINEXT_TRUSTED_HOSTS=ebooks.41tech.cloud
 
 RUN addgroup -g 1001 -S nodejs && adduser -u 1001 -S sambu -G nodejs
+RUN mkdir -p /app/storage && chown sambu:nodejs /app/storage
 
 # O standalone ja traz as dependencias de runtime embutidas.
 COPY --from=build --chown=sambu:nodejs /app/dist/standalone ./
