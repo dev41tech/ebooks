@@ -14,6 +14,9 @@ ENV BUILD_TARGET=node
 RUN npx vinext build
 RUN npx esbuild scripts/migrate-vps.mjs --bundle --platform=node --format=esm --outfile=migrate-vps.mjs
 RUN npx esbuild scripts/check-auth.ts --bundle --platform=node --format=esm --outfile=check-auth.mjs
+# Cria/troca senha de usuario da autenticacao local. Precisa existir no runtime:
+# e o unico caminho para o primeiro login, e la a DATABASE_URL ja esta no ambiente.
+RUN npx esbuild scripts/criar-usuario.mjs --bundle --platform=node --format=esm --outfile=criar-usuario.mjs
 
 # ---------- runtime ----------
 FROM node:22-alpine AS runner
@@ -32,6 +35,7 @@ COPY --from=build --chown=sambu:nodejs /app/dist/standalone ./
 
 COPY --from=build --chown=sambu:nodejs /app/migrate-vps.mjs ./scripts/migrate-vps.mjs
 COPY --from=build --chown=sambu:nodejs /app/check-auth.mjs ./scripts/check-auth.mjs
+COPY --from=build --chown=sambu:nodejs /app/criar-usuario.mjs ./scripts/criar-usuario.mjs
 COPY --from=build --chown=sambu:nodejs /app/scripts/start-vps.sh ./scripts/start-vps.sh
 COPY --from=build --chown=sambu:nodejs /app/drizzle ./drizzle
 

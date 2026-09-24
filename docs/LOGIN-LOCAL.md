@@ -18,8 +18,24 @@ A camada de **autorização** já era local: quem é admin sai de
 
 ## Criar o primeiro usuário
 
+No repositório do **portal** (`dev41tech/ebooks`), não no do gerador:
+
 ```bash
 node scripts/criar-usuario.mjs marcos@exemplo.com "Marcos Dias"
+```
+
+`DATABASE_URL` vem do ambiente — o script não lê `.env`.
+
+**No console do contêiner** (EasyPanel → serviço `ebooks` → Console) a variável
+já está lá, então o comando acima basta. O script é empacotado pelo esbuild no
+build da imagem, como `migrate-vps` e `check-auth`; sem isso ele não existiria no
+runtime, e o primeiro login não teria como ser criado.
+
+**Da sua máquina**, passe a string do banco do **portal** (`ebooks`, não
+`ebook_forge`) na própria chamada:
+
+```bash
+DATABASE_URL="postgres://usuario:senha@host:porta/ebooks" node scripts/criar-usuario.mjs marcos@exemplo.com "Marcos Dias"
 ```
 
 A senha é pedida pelo terminal, sem eco. **Não passe a senha por argumento**: ela

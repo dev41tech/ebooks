@@ -15,7 +15,9 @@
 //
 // Ser admin não vem daqui: continua saindo de SAMBU_ADMIN_EMAILS (ou
 // ADMIN_EMAILS) no ambiente do app.
-import 'dotenv/config';
+// DATABASE_URL vem do ambiente. Sem dotenv de proposito: nao e dependencia
+// deste projeto, e um import dele quebraria o bundle do esbuild que leva este
+// script para dentro da imagem (ver Dockerfile).
 import {createInterface} from 'node:readline';
 import postgres from 'postgres';
 import {randomBytes, randomUUID, scrypt} from 'node:crypto';
