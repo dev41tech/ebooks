@@ -246,3 +246,75 @@
  .beta-app .reader-chapter-title {font-size:1.35em;}
  .beta-app .reader-end {margin-top:32px;}
 }
+
+/* Mobile library and reading experience; desktop presentation is unchanged. */
+.mobile-home-intro,.mobile-reader-dock {display:none;}
+.mobile-reader-sheet:not([open]) {display:none;}
+@media(max-width:600px){
+ .beta-app {background:#faf8f5;}
+ .beta-app>header {background:#faf8f5;border-bottom:0;box-shadow:none;}
+ .beta-app>header .community-brand {max-width:160px;height:40px;}
+ .beta-app>header>.outline {color:#6f246c;border:1px solid #ded5dc;background:transparent;}
+ .beta-app .mobile-home-intro {display:block;padding:24px 22px 18px;color:#241b25;}
+ .beta-app .mobile-home-intro p {font-size:10px;font-weight:700;letter-spacing:.12em;color:#8d287e;margin:0 0 10px;}
+ .beta-app .mobile-home-intro h1 {font:700 34px/1.12 Georgia,serif;margin:0 0 20px;letter-spacing:-.03em;}
+ .beta-app .mobile-home-intro button {display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;border:0;border-radius:14px;background:#ede8ec;color:#68576a;padding:12px 16px;font-size:14px;}
+ .beta-app .mobile-home-intro button span {font-size:24px;}
+ .beta-app .r3-home {background:#faf8f5;color:#241b25;}
+ .beta-app .r3-home>.r3-hero {display:none;}
+ .beta-app .r3-home-content {padding:12px 22px 34px;}
+ .beta-app .r3-home-section {padding-bottom:26px;margin-bottom:26px;border-bottom:1px solid #e7e1e6;}
+ .beta-app .r3-section-heading h2,.beta-app .beta-library-section>h2 {font-family:Georgia,serif;font-size:27px;letter-spacing:-.025em;color:#241b25;}
+ .beta-app .r3-section-heading .eyebrow {display:none;}
+ .beta-app .r3-section-heading>button {color:#862177;min-height:44px;font-size:12px;}
+ .beta-app .r3-book-rail {grid-auto-columns:36%;gap:18px;}
+ .beta-app .r3-book-rail .beta-cover {border-radius:3px;box-shadow:0 7px 13px #28152a22;}
+ .beta-app .r3-book-rail h3 {color:#241b25;font-size:14px;}
+ .beta-app .r3-book-rail p,.beta-app .r3-book-rail small {color:#746575;}
+ .beta-app .r3-home .r3-continue-grid {display:grid;grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:88%;overflow-x:auto;gap:12px;scroll-snap-type:x proximity;padding:4px 0 14px;}
+ .beta-app .r3-home .r3-continue-grid .beta-continue {background:linear-gradient(125deg,#422541,#6e3666);color:white;border:0;scroll-snap-align:start;}
+ .beta-app .r3-home .r3-continue-grid h3 {color:white;}
+ .beta-app .r3-home .r3-continue-grid .continue-button {background:#ffffff18;box-shadow:none;color:white;border:1px solid #ffffff35;border-radius:10px;}
+ .beta-app .r3-suggestions-intro {color:#746575;font-size:14px;line-height:1.5;}
+ .beta-app .r3-suggestion-card {background:white;color:#241b25;border:1px solid #e8e0e7;box-shadow:0 4px 16px #28152a06;}
+ .beta-app .r3-suggestion-info h3,.beta-app .r3-suggestion-info h3 button {color:#241b25;}
+ .beta-app .r3-suggestion-author,.beta-app .r3-suggestion-description {color:#746575;}
+ .beta-app .r3-reading-banner {background:#eee5ee;color:#352239;}
+ .beta-app .r3-reading-banner h2 {font-family:Georgia,serif;color:#352239;font-size:29px;}
+ .beta-app .r3-reading-banner p {color:#68576a;}
+ .beta-app .beta-mobile-nav {inset:auto 10px calc(8px + env(safe-area-inset-bottom));min-height:62px;padding:5px;border:1px solid #ded5df;border-radius:28px;background:#fffaf8ed;box-shadow:0 6px 28px #28152a20;}
+ .beta-app .beta-mobile-nav button {border-radius:22px;font-size:11px;}
+ .beta-app .beta-mobile-nav button[aria-current="page"] {box-shadow:none;background:#eddbee;color:#822375;}
+ .beta-app .reader-epub .reader-top {flex-wrap:nowrap;display:flex;align-items:center;border:0;padding-block:8px;}
+ .beta-app .reader-epub .reader-top>b {flex:1;max-width:none;font-size:12px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;text-align:center;}
+ .beta-app .reader-epub .reader-top>button {flex-shrink:0;font-size:13px;}
+ .beta-app .reader-epub .reader-controls,.beta-app .reader-desktop-feedback {display:none;}
+ .beta-app .reader-epub .reader-chapter-tools>.reader-chapter-nav {display:none;}
+ .beta-app .reader-epub article {padding:24px 26px calc(150px + env(safe-area-inset-bottom));line-height:1.7;}
+ .beta-app .reader-epub .beta-reader-status {bottom:calc(76px + env(safe-area-inset-bottom));background:inherit;color:inherit;font-size:11px;padding:5px 16px;pointer-events:none;}
+ .beta-app .mobile-reader-dock {display:flex;position:fixed;z-index:12;left:16px;right:16px;bottom:calc(12px + env(safe-area-inset-bottom));padding:6px;gap:4px;background:#302433f2;color:white;border:1px solid #ffffff30;border-radius:28px;box-shadow:0 6px 24px #20122526;backdrop-filter:blur(20px);}
+ .beta-app .mobile-reader-dock button {background:transparent;border:0;color:inherit;border-radius:22px;padding:10px 14px;min-height:44px;font-size:15px;}
+ .beta-app .mobile-reader-dock button:first-child {flex:1;text-align:left;font-size:13px;}
+ .beta-app .mobile-reader-dock button:hover {background:#ffffff18;}
+ .beta-app .mobile-reader-sheet {position:fixed;inset:auto 0 0;margin:0 auto;width:100%;max-width:600px;max-height:85dvh;overflow:auto;border:1px solid #e3dbe2;border-radius:28px 28px 0 0;background:#faf8f5;color:#241b25;padding:0;box-shadow:0 -15px 60px #1c102833;}
+ .beta-app .mobile-reader-sheet::backdrop {background:#17101c70;backdrop-filter:blur(3px);}
+ .beta-app .mobile-sheet-body {padding:22px 22px calc(24px + env(safe-area-inset-bottom));}
+ .beta-app .mobile-sheet-heading {display:flex;justify-content:space-between;align-items:center;gap:16px;}
+ .beta-app .mobile-sheet-heading h2 {font-size:23px;margin:0;}
+ .beta-app .mobile-sheet-heading button {width:44px;height:44px;border:0;border-radius:50%;background:#eae4ea;font-size:26px;}
+ .beta-app .mobile-sheet-book {font-size:14px;color:#756775;margin:12px 0 20px;}
+ .beta-app .mobile-reader-sheet progress {width:100%;accent-color:#a32891;}
+ .beta-app .mobile-section-select {display:grid;gap:12px;margin-top:20px;font-weight:600;}
+ .beta-app .mobile-section-select select {width:100%;min-height:48px;padding:10px;border:1px solid #d9cfda;border-radius:12px;background:white;}
+ .beta-app .mobile-sheet-note {font-size:12px;color:#756775;line-height:1.5;}
+ .beta-app .mobile-font-controls {display:flex;justify-content:space-between;align-items:center;background:#ece7ec;border-radius:20px;margin:18px 0;padding:6px;}
+ .beta-app .mobile-font-controls button {width:35%;background:transparent;border:0;font-size:25px;}
+ .beta-app .mobile-theme-options {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+ .beta-app .theme-swatch {display:grid;gap:12px;padding:20px 6px;border:2px solid transparent;border-radius:18px;font-size:12px;}
+ .beta-app .theme-swatch span {font:30px Georgia,serif;}
+ .beta-app .theme-swatch.light {background:white;color:#222;}
+ .beta-app .theme-swatch.sepia {background:#f2e6ce;color:#58462c;}
+ .beta-app .theme-swatch.dark {background:#28252c;color:#f5eff7;}
+ .beta-app .theme-swatch[aria-pressed="true"] {border-color:#a1288b;box-shadow:0 0 0 2px #a1288b22;}
+ .beta-app .mobile-reader-sheet .reader-feedback {padding:0;margin:0;}
+}
