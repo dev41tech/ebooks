@@ -65,7 +65,7 @@ test('missing 0002 is applied before beta; a failure rolls everything back and a
   assert.equal(await migrate(client(pg)), 'applied');
   assert.equal(await migrate(client(pg)), 'already_applied');
   assert.deepEqual((await pg.query('SELECT name FROM sambu_schema_migrations ORDER BY name')).rows.map(row => row.name),
-   ['0002_book_classification', '0003_beta_r26_vps']);
+   ['0002_book_classification', '0003_beta_r26_vps', '0004_auth_local']);
   assert.deepEqual((await pg.query('SELECT title,description,category_main,categories_secondary FROM books')).rows[0],
    {title:'Legacy', description:'Original description', category_main:null, categories_secondary:null});
   assert.deepEqual((await pg.query('SELECT theme,category_main,categories_secondary FROM ebook_drafts')).rows[0],
