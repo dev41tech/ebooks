@@ -28,14 +28,14 @@ export type SessionUser = {
  * para o app subir.
  */
 export async function getUser(): Promise<SessionUser | null> {
-  if (temporaryAdminEnabled()) return TEMPORARY_USER;
   const token = (await cookies()).get(ACCESS_COOKIE)?.value;
-  if (!token) return null;
-
-  const user = await userForAccessToken(token);
-  if (!user) return null;
-
-  return { id: user.id, email: user.email, displayName: user.displayName };
+  if (token) {
+    const user = await userForAccessToken(token);
+    if (user) return { id: user.id, email: user.email, displayName: user.displayName };
+    // An expired personal session must never become the shared admin identity.
+    return null;
+  }
+  return temporaryAdminEnabled() ? TEMPORARY_USER : null;
 }
 
 export async function requireUser(returnTo: string): Promise<SessionUser> {

@@ -318,3 +318,12 @@
  .beta-app .theme-swatch[aria-pressed="true"] {border-color:#a1288b;box-shadow:0 0 0 2px #a1288b22;}
  .beta-app .mobile-reader-sheet .reader-feedback {padding:0;margin:0;}
 }
+
+/* Reader Beta account entry, shared by web and mobile. */
+.beta-login-intro{color:#68576a;font-size:16px;line-height:1.6;margin:0 0 24px;}
+.beta-login-back{display:block;text-align:center;color:#76206b;padding:12px;min-height:44px;}
+.login-card small{font-size:12px;line-height:1.5;color:#68576a;}
+.beta-reader-welcome{max-width:740px;margin:auto;}
+.beta-reader-welcome>p{line-height:1.65;margin:20px 0;}
+.beta-reader-welcome>a{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:14px 22px;}
+@media(max-width:600px){.login-shell{padding:20px 16px;min-height:100dvh;}.login-card{padding:24px 20px;width:100%;}.login-card h1{font-size:30px;line-height:1.15;}.login-card input{font-size:16px;min-height:48px;}.beta-reader-welcome>a{width:100%;}}

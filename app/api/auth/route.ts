@@ -8,7 +8,6 @@ import {
   revokeSession,
   rotateSession,
 } from "../../lib/auth-local";
-import { temporaryAdminEnabled } from "../../lib/temporary-access";
 
 function json(body: unknown, status = 200, setCookies: string[] = []) {
   const headers = new Headers({ "content-type": "application/json", "cache-control": "no-store" });
@@ -48,8 +47,6 @@ export async function POST(request: Request) {
       await revokeSession(jar.get(ACCESS_COOKIE)?.value, jar.get(REFRESH_COOKIE)?.value);
       return json({ ok: true }, 200, clearedCookies());
     }
-
-    if (temporaryAdminEnabled()) return json({ error: "temporary_access_enabled" }, 409);
 
     if (action === "refresh") {
       const refreshToken = (await cookies()).get(REFRESH_COOKIE)?.value;
