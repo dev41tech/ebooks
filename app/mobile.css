@@ -327,3 +327,12 @@
 .beta-reader-welcome>p{line-height:1.65;margin:20px 0;}
 .beta-reader-welcome>a{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:14px 22px;}
 @media(max-width:600px){.login-shell{padding:20px 16px;min-height:100dvh;}.login-card{padding:24px 20px;width:100%;}.login-card h1{font-size:30px;line-height:1.15;}.login-card input{font-size:16px;min-height:48px;}.beta-reader-welcome>a{width:100%;}}
+
+/* Reading tools stay out of the text until the reader requests them. */
+.mobile-reader-toggle{display:none;}
+.beta-app .mobile-reader-dock[hidden]{display:none;}
+@media(max-width:600px){
+ .beta-app .mobile-reader-toggle{display:block;position:fixed;z-index:12;right:18px;bottom:calc(14px + env(safe-area-inset-bottom));width:48px;height:48px;border-radius:50%;border:1px solid #ffffff40;background:#302433ed;color:white;font-size:18px;box-shadow:0 3px 12px #20122522;}
+ .beta-app .mobile-reader-dock button{padding-inline:10px;}
+ .beta-app .mobile-reader-done{display:block;width:100%;min-height:48px;margin-top:22px;padding:12px 18px;border:0;border-radius:16px;background:#602555;color:white;font-size:16px;}
+}
