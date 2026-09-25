@@ -17,7 +17,13 @@ export default function Reader({book,initialPage,initial,theme,font,preference,o
   const [current,setCurrent]=useState(initial),currentRef=useRef(initial),revision=useRef(initial.revision??0);
   const initialRef=useRef(initial);
   const [pdfPage,setPdfPage]=useState(Math.max(1,initial.position));
-  const [state,setState]=useState(''),[loading,setLoading]=useState(false),[error,setError]=useState('');
+  const [notice,setNotice]=useState<{message:string;transient:boolean}|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState('');
+  const setState=useCallback((message:string,transient=false)=>setNotice({message,transient}),[]);
+  useEffect(()=>{
+    if(!notice?.transient)return;
+    const timeout=setTimeout(()=>setNotice(current=>current===notice?null:current),2500);
+    return()=>clearTimeout(timeout);
+  },[notice]);
   const [scrollTarget,setScrollTarget]=useState({position:initial.position,stamp:0});
   const retry=useRef<(()=>void)|null>(null);
   const ready=useRef(false),dirty=useRef(false),intent=useRef(false),mounted=useRef(true),switching=useRef(false),syncing=useRef(false);
@@ -63,17 +69,17 @@ export default function Reader({book,initialPage,initial,theme,font,preference,o
         if(stamp!==generation.current)return false;
         revision.current=saved.revision??0;
         if(currentRef.current.position===location.position&&currentRef.current.progress===location.progress){dirty.current=false;currentRef.current=saved;if(mounted.current)setCurrent(saved);}
-        if(mounted.current)setState(temporaryAccess?'Posição salva no teste compartilhado':'Posição sincronizada com sua conta');return true;
+        if(mounted.current)setState(temporaryAccess?'Posição salva no teste compartilhado':'Posição sincronizada com sua conta',true);return true;
       }catch(e){
         const remote=(e as Error&{location?:Location}).location;
         if(mounted.current){
-          if(remote){void apply(remote);setState('Retomamos a posição salva no outro dispositivo.');}
+          if(remote){void apply(remote);setState('Retomamos a posição salva no outro dispositivo.',true);}
           else {setState('Sem sincronização. Tente salvar novamente antes de trocar de dispositivo.');trackReading('sync_failed',book.id);}
         }
         return false;
       }
     });queue.current=job;return job;
-  },[apply,book.id,onSave,temporaryAccess]);
+  },[apply,book.id,onSave,temporaryAccess,setState]);
 
   const goChapter=useCallback(async(index:number)=>{
     if(switching.current||!pageRef.current)return;
@@ -135,7 +141,7 @@ export default function Reader({book,initialPage,initial,theme,font,preference,o
         const response=await apiFetch('/api/progress',{cache:'no-store'});if(!response.ok)throw new Error('sync_failed');
         const data=await response.json() as {locations?:Record<string,Location>};if(switching.current||dirty.current||revision.current!==requestedRevision||!mounted.current)return;
         const latest=data.locations?.[book.id]||{position:0,progress:0,revision:0};
-        if((latest.revision??0)!==revision.current){await apply(latest);if(mounted.current)setState('Leitura sincronizada com o outro dispositivo.');}
+        if((latest.revision??0)!==revision.current){await apply(latest);if(mounted.current)setState('Leitura sincronizada com o outro dispositivo.',true);}
       }catch{if(mounted.current)setState('Não foi possível sincronizar. Verifique sua conexão.');}
       finally{syncing.current=false;if(pendingRefresh.current&&!switching.current&&mounted.current)void refresh();}
     };
@@ -144,7 +150,7 @@ export default function Reader({book,initialPage,initial,theme,font,preference,o
     const hide=()=>{if(document.visibilityState==='hidden')leave();else void refresh();};
     window.addEventListener('wheel',input,{passive:true});window.addEventListener('touchmove',input,{passive:true});window.addEventListener('keydown',input);window.addEventListener('pointerdown',input,{passive:true});window.addEventListener('scroll',scroll,{passive:true});window.addEventListener('focus',refresh);window.addEventListener('pagehide',leave);document.addEventListener('visibilitychange',hide);
     return()=>{mounted.current=false;refreshRef.current=null;requestId.current++;request.current?.abort();cancelAnimationFrame(frame);window.removeEventListener('wheel',input);window.removeEventListener('touchmove',input);window.removeEventListener('keydown',input);window.removeEventListener('pointerdown',input);window.removeEventListener('scroll',scroll);window.removeEventListener('focus',refresh);window.removeEventListener('pagehide',leave);document.removeEventListener('visibilitychange',hide);leave();};
-  },[book.id,pdf,apply,persist]);
+  },[book.id,pdf,apply,persist,setState]);
 
   useEffect(()=>{if(!loading&&pendingRefresh.current)void refreshRef.current?.();},[loading]);
 
@@ -156,5 +162,5 @@ export default function Reader({book,initialPage,initial,theme,font,preference,o
       <div className="reader-chapter-tools">{navigation}{loading&&<p role="status">Carregando capítulo…</p>}{error&&<div role="alert"><p>{error}</p><button className="outline" onClick={()=>retry.current?.()}>Tentar novamente</button></div>}</div>
       {!loading&&!error&&page&&<article ref={article} style={{fontSize:font}}>{page.chapter.blocks.map(block=><div className="reader-block" key={block.position} id={`paragraph-${block.position}`} data-reader-position={block.position}>{(block.chapterLabel||block.heading)&&<div className="reader-chapter-heading">{block.chapterLabel&&<p className="reader-chapter-number">{block.chapterLabel}</p>}{block.heading&&<h2 className="reader-chapter-title">{block.heading}</h2>}</div>}{!block.hidden&&<p>{block.text}</p>}</div>)}{navigation}<div className="reader-end"><button className="outline" onClick={()=>persist(currentRef.current)}>Salvar posição</button>{page.chapter.index===page.chapterCount-1&&<button className="primary" onClick={async()=>{clearTimer();const end={position:page.totalParagraphs-1,progress:100,revision:revision.current};currentRef.current=end;dirty.current=true;setCurrent(end);await persist(end);}}>Concluir leitura</button>}</div></article>}
     </>}
-    <div className="beta-reader-status" role="status">{state||`${current.progress}% lido`}</div></main>;
+    {notice&&<div className="beta-reader-status" role="status">{notice.message}</div>}</main>;
 }
