@@ -22,7 +22,7 @@ const publicHost='ebooks.41tech.cloud';
 const publicOrigin=`https://${publicHost}`;
 const originalEnv={...process.env};
 const users=new Map(),sessions=new Map();
-let POST, nodeToWebRequest;
+let POST, getUser, nodeToWebRequest;
 
 const SENHA='Only-for-isolated-tests';
 const hashOf=token=>createHash('sha256').update(token).digest('hex');
@@ -67,17 +67,18 @@ before(async()=>{
  ({nodeToWebRequest}=await import('../node_modules/vinext/dist/server/prod-server.js'));
  await mkdir(output,{recursive:true});
  await build({
-  entryPoints:{auth:path.join(root,'app/api/auth/route.ts')},
+  entryPoints:{auth:path.join(root,'app/api/auth/route.ts'),session:path.join(root,'app/auth.ts')},
   outdir:output,outExtension:{'.js':'.mjs'},bundle:true,platform:'node',format:'esm',packages:'external',
   plugins:[{name:'isolated',setup(b){
    b.onResolve({filter:/^next\/(headers|navigation)$/},args=>({path:args.path,namespace:'test-next'}));
    b.onResolve({filter:/db\/sql$/},()=>({path:'test-db',namespace:'test-next'}));
    b.onLoad({filter:/.*/,namespace:'test-next'},args=>({contents:args.path==='test-db'
     ?'export const database=globalThis.__authRouteDb;'
-    :'export async function cookies(){return new Map(globalThis.__authTestCookies || []);} export function redirect(){throw new Error("unexpected_redirect");}'}));
+    :'export async function cookies(){return new Map((globalThis.__authTestCookies || []).map(([key,value])=>[key,typeof value === "string" ? {value} : value]));} export function redirect(){throw new Error("unexpected_redirect");}'}));
   }}],
  });
  ({POST}=await import(pathToFileURL(path.join(output,'auth.mjs'))));
+ ({getUser}=await import(pathToFileURL(path.join(output,'session.mjs'))));
 });
 
 beforeEach(()=>{
@@ -226,18 +227,21 @@ test('logout limpa os cookies mesmo sem sessão, e apaga a do servidor quando ex
 
 // --- modo temporário -------------------------------------------------------
 
-test('com acesso temporário ligado, login e cadastro respondem 409 em vez de criar conta',async()=>{
+test('conta pessoal prevalece sobre teste compartilhado; cookie inválido não ganha admin temporário',async()=>{
  process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN='true';
- // O formato aceito é estrito (sem milissegundos): a regex de
- // temporaryAdminEnabled recusa o toISOString() cru, e recusar é o certo --
- // data malformada não pode virar acesso aberto por acidente.
  process.env.SAMBU_TEMPORARY_PUBLIC_ADMIN_UNTIL=new Date(Date.now()+3600_000).toISOString().replace(/\.\d{3}Z$/,'Z');
- for(const body of [criar(),{action:'login',email:'reader@example.test',password:SENHA}]){
-  const response=await POST(proxied(body));
-  assert.equal(response.status,409);
-  assert.equal((await response.json()).error,'temporary_access_enabled');
- }
- assert.equal(users.size,0);
- // Logout segue funcionando: é como se sai do modo temporário no navegador.
+ assert.equal((await getUser()).temporary,true);
+ const signup=await POST(proxied(criar()));
+ assert.equal(signup.status,201);
+ const login=await POST(proxied({action:'login',email:'reader@example.test',password:SENHA}));
+ assert.equal(login.status,200);
+ const token=cookiesOf(login).find(c=>c.startsWith('sb-access-token=')).split(';')[0].split('=')[1];
+ globalThis.__authTestCookies=[['sb-access-token',token]];
+ assert.equal((await getUser()).email,'reader@example.test');
+ assert.equal((await getUser()).temporary,undefined);
+ globalThis.__authTestCookies=[['sb-access-token','invalid-session']];
+ assert.equal(await getUser(),null);
+ globalThis.__authTestCookies=[['sb-access-token',token]];
  assert.equal((await POST(proxied({action:'logout'}))).status,200);
+ assert.equal(await getUser(),null);
 });

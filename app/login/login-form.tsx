@@ -10,12 +10,14 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (mode === "signup" && password !== confirmation) {setError("As senhas não coincidem.");return;}
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -65,15 +67,18 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
           <b>Sambu</b>
         </div>
         <p className="eyebrow coral">
-          {mode === "login" ? "Entrar" : "Criar conta"}
+          {mode === "login" ? "LEITORES BETA" : "SUA CONTA BETA"}
         </p>
-        <h1>Histórias que ficam em você.</h1>
+        <h1>{mode === "login" ? "Seu próximo capítulo começa aqui." : "Faça parte da comunidade Sambu."}</h1>
+        <p className="beta-login-intro">Entre para guardar seus livros e continuar de onde parou, no celular ou computador. Participação gratuita no Beta.</p>
 
         {mode === "signup" && (
           <label>
             Nome
             <input
               type="text"
+              required
+              maxLength={120}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               autoComplete="name"
@@ -106,6 +111,7 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
           />
         </label>
 
+        {mode === "signup" && <label>Confirmar senha<input type="password" required minLength={8} autoComplete="new-password" value={confirmation} onChange={e=>setConfirmation(e.target.value)}/><small>Use pelo menos 8 caracteres. Guarde sua senha para voltar à sua biblioteca.</small></label>}
         {error && <p className="login-error" role="alert">{error}</p>}
         {notice && <p className="login-notice" role="status">{notice}</p>}
 
@@ -121,12 +127,15 @@ export default function LoginForm({ returnTo }: { returnTo: string }) {
             setMode(mode === "login" ? "signup" : "login");
             setError(null);
             setNotice(null);
+            setPassword("");
+            setConfirmation("");
           }}
         >
           {mode === "login"
-            ? "Não tenho conta ainda"
+            ? "Criar minha conta Beta"
             : "Já tenho conta, quero entrar"}
         </button>
+        <a className="beta-login-back" href="/">← Voltar ao acervo</a>
       </form>
     </main>
   );

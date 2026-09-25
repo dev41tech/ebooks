@@ -12,7 +12,8 @@ export default async function LoginPage({
   const { return_to } = await searchParams;
   const returnTo = safeReturnPath(return_to || "/");
 
-  if (await getUser()) redirect(returnTo);
+  const user = await getUser();
+  if (user && !user.temporary) redirect(returnTo);
 
   return <LoginForm returnTo={returnTo} />;
 }
